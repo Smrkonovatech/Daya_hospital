@@ -86,11 +86,12 @@ export type ActionType =
 
 export interface TranscriptEntry {
   id: string;
-  speaker: "agent" | "caller" | "ivr";
+  speaker: "agent" | "caller" | "ivr" | "AI_AGENT" | "CALLER" | "STAFF";
   speakerName: string;
   text: string;
   malayalamText?: string;
   timestampMs: number;
+  timestamp?: string;
 }
 
 export interface AiActionSummary {
@@ -99,6 +100,7 @@ export interface AiActionSummary {
   status: ActionStatus;
   description: string;
   hmsReference?: string;
+  result?: string;
   timestamp: string;
 }
 
@@ -106,18 +108,18 @@ export interface CallReviewEntry {
   id: string;
   reviewerId: string;
   reviewerName: string;
-  action: "REVIEWED" | "NOTE_ADDED" | "FOLLOW_UP_REQUESTED" | "FOLLOW_UP_RESOLVED";
+  action: "REVIEWED" | "NOTE_ADDED" | "FOLLOW_UP_REQUESTED" | "FOLLOW_UP_RESOLVED" | "FLAGGED";
   notes?: string;
   timestamp: string;
 }
 
 export interface CallRecord {
   id: string;
-  externalCallId: string;
+  externalCallId?: string;
   callerNumber: string;
   callerName?: string;
   startTime: string;
-  endTime: string;
+  endTime?: string;
   durationSeconds: number;
   callStatus: CallStatus;
   callSource: CallSource;

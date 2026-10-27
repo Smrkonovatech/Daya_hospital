@@ -1,21 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actionsService, ActionFilterParams } from "@/lib/services/actions-service";
+import { actionsQuerySchema } from "@/lib/validations/query-schema";
 import { ActionWebhookEvent } from "@/types";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
+    const queryObj: Record<string, string | undefined> = {};
+    searchParams.forEach((val, key) => {
+      queryObj[key] = val;
+    });
+
+    const parsed = actionsQuerySchema.safeParse(queryObj);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid query parameters",
+          details: parsed.error.format(),
+        },
+        { status: 400 }
+      );
+    }
+
     const params: ActionFilterParams = {
-      searchQuery: searchParams.get("q") || searchParams.get("search") || undefined,
-      dateRange: searchParams.get("dateRange") || undefined,
-      status: searchParams.get("status") || undefined,
-      actionType: searchParams.get("actionType") || searchParams.get("type") || undefined,
-      onlyFollowUp: searchParams.get("onlyFollowUp") === "true",
-      sortBy: (searchParams.get("sortBy") as ActionFilterParams["sortBy"]) || "requestedAt",
-      sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
-      page: parseInt(searchParams.get("page") || "1", 10),
-      limit: parseInt(searchParams.get("limit") || "8", 10),
+      searchQuery: parsed.data.search,
+      status: parsed.data.status,
+      actionType: parsed.data.actionType,
+      page: parsed.data.page,
+      limit: parsed.data.limit,
     };
 
     const result = await actionsService.getActions(params);
@@ -25,6 +39,9 @@ export async function GET(request: NextRequest) {
       ...result,
     });
   } catch (error: unknown) {
+    if ((error as { digest?: string })?.digest === "NEXT_PRERENDER_INTERRUPTED") {
+      throw error;
+    }
     const msg = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json(
       { success: false, error: msg },

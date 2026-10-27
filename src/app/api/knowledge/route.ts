@@ -1,21 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { knowledgeService } from "@/lib/services/knowledge-service";
 import { knowledgeFormSchema } from "@/lib/validations/knowledge-schema";
+import { knowledgeQuerySchema } from "@/lib/validations/query-schema";
 import { KnowledgeCategory, KnowledgeStatus } from "@/types";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const query = searchParams.get("query") || undefined;
-    const category = searchParams.get("category") || undefined;
-    const status = searchParams.get("status") || undefined;
-    const syncStatus = searchParams.get("syncStatus") || undefined;
+
+    const queryObj: Record<string, string | undefined> = {};
+    searchParams.forEach((val, key) => {
+      queryObj[key] = val;
+    });
+
+    const parsed = knowledgeQuerySchema.safeParse(queryObj);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid query parameters",
+          details: parsed.error.format(),
+        },
+        { status: 400 }
+      );
+    }
 
     const articles = knowledgeService.getArticles({
-      query,
-      category,
-      status,
-      syncStatus,
+      query: parsed.data.search,
+      category: parsed.data.category,
+      status: parsed.data.status,
+      syncStatus: parsed.data.syncStatus,
     });
 
     return NextResponse.json({
@@ -24,6 +38,9 @@ export async function GET(request: NextRequest) {
       data: articles,
     });
   } catch (error) {
+    if ((error as { digest?: string })?.digest === "NEXT_PRERENDER_INTERRUPTED") {
+      throw error;
+    }
     console.error("GET /api/knowledge error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to retrieve knowledge base articles." },

@@ -7,9 +7,20 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
 enum UserRole {
   HOSPITAL_ADMIN
+  HOSPITAL_STAFF
   CALL_REVIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+  SUSPENDED
 }
 
 enum CallStatus {
@@ -18,6 +29,7 @@ enum CallStatus {
   MISSED
   TRANSFERRED
   FAILED
+  COMPLETED
 }
 
 enum CallSource {
@@ -50,6 +62,17 @@ enum FollowUpStatus {
   RESOLVED
 }
 
+enum ActionType {
+  CHECK_DOCTOR_SLOT
+  BOOK_APPOINTMENT
+  RESCHEDULE_APPOINTMENT
+  CANCEL_APPOINTMENT
+  TRANSFER_CALL_TO_STAFF
+  FEE_ENQUIRY
+  DEPARTMENT_ROUTING
+  GENERAL_ASSISTANCE
+}
+
 enum ActionStatus {
   REQUESTED
   IN_PROGRESS
@@ -60,16 +83,6 @@ enum ActionStatus {
   CANCELLED
 }
 
-enum ActionType {
-  CHECK_DOCTOR_SLOT
-  BOOK_APPOINTMENT
-  RESCHEDULE_APPOINTMENT
-  CANCEL_APPOINTMENT
-  TRANSFER_CALL_TO_STAFF
-  FEE_ENQUIRY
-  DEPARTMENT_ROUTING
-}
-
 enum KnowledgeStatus {
   DRAFT
   UNDER_REVIEW
@@ -77,101 +90,350 @@ enum KnowledgeStatus {
   ARCHIVED
 }
 
-model User {
-  id         String   @id @default(cuid())
-  email      String   @unique
-  name       String
-  role       UserRole @default(CALL_REVIEWER)
-  department String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+enum IntegrationHealth {
+  HEALTHY
+  DEGRADED
+  DOWN
 }
 
-model CallRecord {
-  id                String         @id
-  externalCallId    String         @unique
-  callerNumber      String
-  callerName        String?
-  startTime         DateTime
-  endTime           DateTime
-  durationSeconds   Int
-  callStatus        CallStatus     @default(ANSWERED)
-  callSource        CallSource     @default(IVR_ROLLOVER)
-  language          CallLanguage   @default(MALAYALAM)
-  intentCategory    IntentCategory @default(GENERAL_QUERY)
-  aiSummary         String
-  aiConfidence      Float          @default(0.95)
-  requiresFollowUp  Boolean        @default(false)
-  followUpStatus    FollowUpStatus @default(NOT_REQUIRED)
-  followUpNotes     String?
-  assignedStaff     String?
-  hmsTransactionRef String?
-  recordingUrl      String?
-  transcriptJson    String? // Stored as serialized JSON
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  DUPLICATE
+}
 
-  actions           AiAction[]
+enum PriorityLevel {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+// ----------------------------------------------------
+// 1. USERS & ROLES
+// ----------------------------------------------------
+
+model User {
+  id                  String           @id @default(cuid())
+  email               String           @unique
+  name                String
+  passwordHash        String
+  role                UserRole         @default(CALL_REVIEWER)
+  status              UserStatus       @default(ACTIVE)
+  department          String
+  employeeId          String?          @unique
+  phone               String?
+  canAccessRecordings Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  lastLoginAt         DateTime?
+
+  auditLogs           AuditLog[]
+  assignedFollowUps   FollowUpTask[]
+  rolePermissions     RolePermission[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+model RolePermission {
+  id        String   @id @default(cuid())
+  role      UserRole
+  resource  String   // CALLS, RECORDINGS, KNOWLEDGE_BASE, USERS, SETTINGS, AUDIT_LOGS, METRICS
+  action    String   // READ, WRITE, DELETE, PUBLISH, EXPORT
+  isAllowed Boolean  @default(true)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([role, resource, action])
+  @@index([role])
+}
+
+// ----------------------------------------------------
+// 2. CALLS & TRANSCRIPTS & RECORDINGS
+// ----------------------------------------------------
+
+model CallRecord {
+  id                 String             @id
+  externalCallId     String?            @unique // External Sarvam interaction ID
+  telephonySessionId String?            @unique // External IVR SIP session ID
+  callerNumber       String             // Masked: +91 94471 •••••
+  callerName         String?
+  patientUhid        String?
+  startTime          DateTime
+  endTime            DateTime?
+  durationSeconds    Int                @default(0)
+  callStatus         CallStatus         @default(ANSWERED)
+  callSource         CallSource         @default(IVR_ROLLOVER)
+  language           CallLanguage       @default(MALAYALAM)
+  intentCategory     IntentCategory     @default(GENERAL_QUERY)
+  aiSummary          String
+  aiConfidence       Float              @default(0.95)
+  requiresFollowUp   Boolean            @default(false)
+  followUpStatus     FollowUpStatus     @default(NOT_REQUIRED)
+  followUpNotes      String?
+  assignedStaff      String?
+  hmsTransactionRef  String?
+  isReviewed         Boolean            @default(false)
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  transcriptEntries  TranscriptEntry[]
+  recordingMetadata  RecordingMetadata?
+  actions            AiAction[]
+  followUpTasks      FollowUpTask[]
 
   @@index([callerNumber])
   @@index([callStatus])
   @@index([intentCategory])
+  @@index([language])
   @@index([startTime])
+  @@index([requiresFollowUp])
 }
 
-model AiAction {
-  id              String       @id
-  callId          String
-  callerNumber    String
-  callerName      String?
-  actionType      ActionType
-  status          ActionStatus @default(REQUESTED)
-  idempotencyKey  String       @unique
-  requestedAt     DateTime     @default(now())
-  completedAt     DateTime?
-  hmsBookingRef   String?
-  doctorName      String?
-  department      String?
-  appointmentSlot String?
-  patientUhid     String?
-  patientName     String?
-  failureReason   String?
-  staffNotes      String?
-  payloadJson     String? // Serialized request payload
-  responseJson    String? // Serialized response payload
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+model TranscriptEntry {
+  id            String     @id @default(cuid())
+  callId        String
+  speaker       String     // AI_AGENT, CALLER, STAFF
+  text          String
+  textMalayalam String?
+  timestampMs   Int
+  confidence    Float?
+  sentiment     String?
+  createdAt     DateTime   @default(now())
 
-  call            CallRecord   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  call          CallRecord @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([timestampMs])
+}
+
+model RecordingMetadata {
+  id                String     @id @default(cuid())
+  callId            String     @unique
+  externalSessionId String?
+  storageKey        String?
+  storageUrl        String?
+  mimeType          String     @default("audio/webm;codecs=opus")
+  durationSeconds   Int
+  fileSizeBytes     Int?
+  hasConsent        Boolean    @default(true)
+  retentionExpiry   DateTime
+  isArchived        Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  call              CallRecord @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([retentionExpiry])
+}
+
+// ----------------------------------------------------
+// 3. AI ACTIONS & OUTCOME EVENTS
+// ----------------------------------------------------
+
+model AiAction {
+  id                String         @id
+  callId            String
+  actionType        ActionType
+  status            ActionStatus   @default(REQUESTED)
+  idempotencyKey    String         @unique
+  externalReference String?        // HMS booking reference or Sarvam action ID
+  doctorName        String?
+  department        String?
+  appointmentSlot   String?
+  patientUhid       String?
+  patientName       String?
+  failureReason     String?
+  staffNotes        String?
+  payloadJson       String?
+  responseJson      String?
+  requestedAt       DateTime       @default(now())
+  completedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  call              CallRecord     @relation(fields: [callId], references: [id], onDelete: Cascade)
+  events            ActionEvent[]
 
   @@index([callId])
   @@index([status])
+  @@index([actionType])
   @@index([idempotencyKey])
+  @@index([requestedAt])
 }
 
+model ActionEvent {
+  id              String   @id @default(cuid())
+  actionId        String
+  eventType       String   // SLOT_LOOKUP, PAYLOAD_SENT, HMS_CONFIRMED, VERIFICATION_FAILED
+  status          String
+  hmsResponseCode String?
+  details         String?
+  timestamp       DateTime @default(now())
+
+  action          AiAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@index([actionId])
+  @@index([timestamp])
+}
+
+// ----------------------------------------------------
+// 4. CLINICAL FOLLOW-UP TASKS
+// ----------------------------------------------------
+
+model FollowUpTask {
+  id           String         @id @default(cuid())
+  callId       String
+  callerNumber String
+  callerName   String?
+  reason       String
+  priority     PriorityLevel  @default(NORMAL)
+  status       FollowUpStatus @default(PENDING)
+  assignedTo   String?
+  assignedUser User?          @relation(fields: [assignedTo], references: [id], onDelete: SetNull)
+  notes        String?
+  dueAt        DateTime?
+  resolvedAt   DateTime?
+  resolvedBy   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  call         CallRecord     @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@index([status])
+  @@index([priority])
+}
+
+// ----------------------------------------------------
+// 5. KNOWLEDGE ARTICLES & VERSION AUDIT
+// ----------------------------------------------------
+
 model KnowledgeArticle {
-  id                String          @id
-  title             String
-  titleMalayalam    String
-  category          String
-  summary           String
-  content           String
-  contentMalayalam  String
-  status            KnowledgeStatus @default(PUBLISHED)
-  version           Int             @default(1)
-  lastUpdatedBy     String
-  updatedAt         DateTime        @updatedAt
-  syncedToSarvam    Boolean         @default(false)
-  lastSyncedAt      DateTime?
-  auditHistoryJson  String? // Serialized audit trail
+  id                        String             @id
+  title                     String
+  titleMalayalam            String?
+  category                  String
+  summary                   String
+  content                   String
+  contentMalayalam          String?
+  sourceReference           String?
+  internalNotes             String?
+  status                    KnowledgeStatus    @default(DRAFT)
+  version                   Int                @default(1)
+  lastUpdatedBy             String
+  lastPublishedAt           DateTime?
+  lastPublishedBy           String?
+  publishedContent          String?
+  publishedContentMalayalam String?
+  hasUnpublishedChanges     Boolean            @default(false)
+  syncedToSarvam            Boolean            @default(false)
+  lastSyncedAt              DateTime?
+  isDemoData                Boolean            @default(false)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  versions                  KnowledgeVersion[]
+
+  @@index([category])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model KnowledgeVersion {
+  id               String           @id @default(cuid())
+  articleId        String
+  versionNumber    Int
+  title            String
+  content          String
+  action           String           // CREATED, EDITED_DRAFT, PUBLISHED, ARCHIVED
+  summaryOfChanges String
+  previousStatus   String
+  newStatus        String
+  createdByName    String
+  createdAt        DateTime         @default(now())
+
+  article          KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, versionNumber])
+  @@index([articleId])
+}
+
+// ----------------------------------------------------
+// 6. INTEGRATION HEALTH, AUDIT & WEBHOOKS
+// ----------------------------------------------------
+
+model IntegrationHealthSnapshot {
+  id                String            @id @default(cuid())
+  integration       String            // sarvam_ai, daya_hms, telephony_ivr
+  name              String
+  status            String            // Connected, Connected (Demo Mode), Degraded, Down
+  health            IntegrationHealth @default(HEALTHY)
+  latencyMs         Int
+  lastEventReceived DateTime?
+  metadataJson      String?
+  recordedAt        DateTime          @default(now())
+
+  @@index([integration, recordedAt])
 }
 
 model AuditLog {
   id          String   @id @default(cuid())
-  entityType  String
+  entityType  String   // CALL, ACTION, KNOWLEDGE, USER, SETTINGS, AUTH
   entityId    String
-  action      String
+  action      String   // LOGIN, LOGOUT, CREATED, UPDATED, PUBLISHED, DELETED, VERIFIED
   performedBy String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ipAddress   String?
   details     String?
   timestamp   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([timestamp])
+  @@index([userId])
+}
+
+model WebhookProcessingRecord {
+  id              String        @id @default(cuid())
+  provider        String        // sarvam, telephony, hms
+  eventType       String        // call_ended, action_event, slot_update
+  externalEventId String?       @unique
+  idempotencyKey  String?       @unique
+  payloadHash     String
+  status          WebhookStatus @default(RECEIVED)
+  retryCount      Int           @default(0)
+  errorMessage    String?
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([provider, eventType])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ----------------------------------------------------
+// 7. HOSPITAL ADMINISTRATION SETTINGS
+// ----------------------------------------------------
+
+model HospitalSetting {
+  id                          String   @id @default("default_hospital_settings")
+  retentionDays               String   @default("30")
+  enableMalayalamConsent      Boolean  @default(true)
+  strictMasking               Boolean  @default(true)
+  defaultStaffRecordingAccess Boolean  @default(false)
+  missedCallThreshold         Int      @default(30)
+  urgentFollowUpAlerts        Boolean  @default(true)
+  emergencyCasualtyAlerts     Boolean  @default(true)
+  dailyDigestEmail            Boolean  @default(true)
+  hmsTimeoutThresholdMs       Int      @default(3000)
+  lastUpdatedBy               String?
+  updatedAt                   DateTime @updatedAt
 }
