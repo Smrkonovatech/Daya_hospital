@@ -93,7 +93,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (res.ok && data.success) {
         setUser(data.user);
-        await refreshUser();
         return { success: true };
       }
       return { success: false, error: data.error || "Login failed" };

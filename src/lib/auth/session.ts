@@ -9,28 +9,39 @@ const SECRET_KEY =
 const revokedTokens = new Set<string>();
 
 /**
- * Base64URL encode/decode helpers compatible with Edge & Node
+ * Binary-safe Base64URL encode/decode helpers compatible with Edge & Node
  */
-function base64UrlEncode(str: string): string {
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(str)
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(str).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return btoa(binary)
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 }
 
-function base64UrlDecode(str: string): string {
-  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+function base64UrlToBytes(base64Url: string): Uint8Array<ArrayBuffer> {
+  let base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
   while (base64.length % 4) {
     base64 += "=";
   }
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(base64, "base64").toString("utf-8");
+  const binary = atob(base64);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
-  return atob(base64);
+  return bytes;
+}
+
+function stringToBase64Url(str: string): string {
+  return bytesToBase64Url(new TextEncoder().encode(str));
+}
+
+function base64UrlToString(base64Url: string): string {
+  return new TextDecoder().decode(base64UrlToBytes(base64Url));
 }
 
 async function getHmacKey(): Promise<CryptoKey> {
@@ -55,7 +66,7 @@ export async function createSessionToken(
   const session: AuthSession = { ...sessionData, expiresAt };
 
   const payloadStr = JSON.stringify(session);
-  const encodedPayload = base64UrlEncode(payloadStr);
+  const encodedPayload = stringToBase64Url(payloadStr);
 
   const key = await getHmacKey();
   const enc = new TextEncoder();
@@ -65,9 +76,7 @@ export async function createSessionToken(
     enc.encode(encodedPayload)
   );
 
-  const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-  const signatureBinary = String.fromCharCode(...signatureArray);
-  const encodedSignature = base64UrlEncode(signatureBinary);
+  const encodedSignature = bytesToBase64Url(new Uint8Array(signatureBuffer));
 
   return `${encodedPayload}.${encodedSignature}`;
 }
@@ -93,11 +102,8 @@ export async function verifySessionToken(
     const key = await getHmacKey();
     const enc = new TextEncoder();
 
-    // Reconstruct binary signature
-    const signatureBinary = base64UrlDecode(encodedSignature);
-    const signatureBytes = new Uint8Array(
-      Array.from(signatureBinary).map((char) => char.charCodeAt(0))
-    );
+    // Reconstruct binary signature bytes directly
+    const signatureBytes = base64UrlToBytes(encodedSignature);
 
     const isValid = await crypto.subtle.verify(
       "HMAC",
@@ -108,7 +114,7 @@ export async function verifySessionToken(
 
     if (!isValid) return null;
 
-    const payloadJson = base64UrlDecode(encodedPayload);
+    const payloadJson = base64UrlToString(encodedPayload);
     const session: AuthSession = JSON.parse(payloadJson);
 
     // Check expiration

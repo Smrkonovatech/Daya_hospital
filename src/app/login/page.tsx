@@ -33,7 +33,14 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const redirectPath = searchParams.get("from") || "/overview";
 
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
+
+  // If already authenticated, navigate to destination
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      router.push(redirectPath);
+    }
+  }, [isAuthenticated, redirectPath, router]);
 
   const [showPassword, setShowPassword] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
@@ -52,8 +59,8 @@ function LoginContent() {
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema) as unknown as Resolver<LoginFormData>,
     defaultValues: {
-      email: "",
-      password: "",
+      email: "admin@dayahospital.com",
+      password: "DayaAdmin@2026",
     },
   });
 
@@ -77,6 +84,7 @@ function LoginContent() {
 
       if (res.success) {
         router.push(redirectPath);
+        router.refresh();
       } else {
         setErrorMessage(res.error || "Invalid hospital email or password.");
       }
@@ -108,15 +116,16 @@ function LoginContent() {
     }
   };
 
-  const handleQuickFill = (role: "admin" | "staff") => {
-    if (role === "admin") {
-      setValue("email", "admin@dayahospital.com");
-      setValue("password", "DayaAdmin@2026");
-    } else {
-      setValue("email", "staff@dayahospital.com");
-      setValue("password", "DayaStaff@2026");
-    }
+  const handleQuickFill = (role: "admin" | "staff", autoSubmit = true) => {
+    const email = role === "admin" ? "admin@dayahospital.com" : "staff@dayahospital.com";
+    const password = role === "admin" ? "DayaAdmin@2026" : "DayaStaff@2026";
+    const opts = { shouldValidate: true, shouldDirty: true, shouldTouch: true };
+    setValue("email", email, opts);
+    setValue("password", password, opts);
     setErrorMessage(null);
+    if (autoSubmit) {
+      onSubmit({ email, password });
+    }
   };
 
   return (
