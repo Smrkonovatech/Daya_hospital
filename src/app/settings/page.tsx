@@ -9,6 +9,7 @@ import {
   Radio,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,46 +72,44 @@ export default function SettingsPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                Hospital Settings & Access Control
-              </h1>
-              <Badge variant="teal" size="sm">
-                NABH Privacy Aligned
-              </Badge>
+        <PageHeader
+          title="Hospital Settings & Access Control"
+          description="Role permissions, patient data redaction rules, recording retention policies, and alert thresholds."
+          badge={
+            <Badge variant="teal" size="sm">
+              NABH Privacy Aligned
+            </Badge>
+          }
+          breadcrumbs={[
+            { label: "Overview", href: "/overview" },
+            { label: "Settings" },
+          ]}
+          actions={
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg text-xs">
+              <span className="text-slate-500 font-medium pl-1 hidden sm:inline">Viewing as:</span>
+              <button
+                onClick={() => setCurrentUserRole("HOSPITAL_ADMIN")}
+                className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                  currentUserRole === "HOSPITAL_ADMIN"
+                    ? "bg-[#0C5DB8] text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Hospital Admin
+              </button>
+              <button
+                onClick={() => setCurrentUserRole("CALL_REVIEWER")}
+                className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                  currentUserRole === "CALL_REVIEWER"
+                    ? "bg-[#0C5DB8] text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Call Reviewer
+              </button>
             </div>
-            <p className="text-xs text-slate-500">
-              Role permissions, patient data redaction rules, recording retention policies, and alert thresholds
-            </p>
-          </div>
-
-          {/* Role switcher for quick verification */}
-          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg text-xs">
-            <span className="text-slate-500 font-medium pl-1">Viewing as:</span>
-            <button
-              onClick={() => setCurrentUserRole("HOSPITAL_ADMIN")}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                currentUserRole === "HOSPITAL_ADMIN"
-                  ? "bg-[#0C5DB8] text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Hospital Admin
-            </button>
-            <button
-              onClick={() => setCurrentUserRole("CALL_REVIEWER")}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                currentUserRole === "CALL_REVIEWER"
-                  ? "bg-[#0C5DB8] text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Call Reviewer
-            </button>
-          </div>
-        </div>
+          }
+        />
 
         {savedSuccess && (
           <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-800">

@@ -8,6 +8,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -129,48 +130,52 @@ export default function CallHistoryPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              Call History & Interaction Logs
-            </h1>
-            <p className="text-xs text-slate-500">
-              Audit log of all inbound Malayalam voice calls routed from Daya Hospital IVR
-            </p>
-          </div>
+        <PageHeader
+          title="Call History & Interaction Logs"
+          description="Audit log of all inbound Malayalam voice calls routed from Daya Hospital IVR to the AI assistant."
+          badge={
+            <Badge variant="teal" size="sm">
+              Live Voice Sessions
+            </Badge>
+          }
+          breadcrumbs={[
+            { label: "Overview", href: "/overview" },
+            { label: "Call History" },
+          ]}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRevealAllPhones(!revealAllPhones)}
+                className="gap-1.5 text-xs text-slate-700"
+                title="Toggle privacy masking for authorized audit"
+              >
+                {revealAllPhones ? (
+                  <>
+                    <EyeOff className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Mask Numbers</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Reveal Numbers (Audit)</span>
+                  </>
+                )}
+              </Button>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRevealAllPhones(!revealAllPhones)}
-              className="gap-1.5 text-xs text-slate-700"
-              title="Toggle privacy masking for authorized audit"
-            >
-              {revealAllPhones ? (
-                <>
-                  <EyeOff className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Mask Numbers</span>
-                </>
-              ) : (
-                <>
-                  <Eye className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Reveal Numbers (Audit)</span>
-                </>
-              )}
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportCSV}
-              className="gap-1.5 text-xs text-slate-700"
-            >
-              <Download className="h-3.5 w-3.5 text-slate-500" />
-              <span>Export CSV</span>
-            </Button>
-          </div>
-        </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCSV}
+                className="gap-1.5 text-xs text-slate-700"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-500" />
+                <span>Export CSV</span>
+              </Button>
+            </div>
+          }
+        />
 
         {/* Filters Bar Card */}
         <Card>

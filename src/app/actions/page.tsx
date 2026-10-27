@@ -8,6 +8,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -107,27 +108,24 @@ export default function AiActionsPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                AI Actions & HMS Status Ledger
-              </h1>
-              <Badge variant="teal" size="sm">
-                Idempotency Guard Active
-              </Badge>
-            </div>
-            <p className="text-xs text-slate-500">
-              Audit trail of every doctor availability check, slot booking, reschedule, and staff handoff
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">
-              Rule: Appointments only marked confirmed upon HMS HTTP 200 response
+        <PageHeader
+          title="AI Actions & HMS Status Ledger"
+          description="Audit trail of every doctor availability check, slot booking, reschedule, and staff handoff verified against Daya HMS."
+          badge={
+            <Badge variant="teal" size="sm">
+              Idempotency Guard Active
+            </Badge>
+          }
+          breadcrumbs={[
+            { label: "Overview", href: "/overview" },
+            { label: "AI Actions" },
+          ]}
+          actions={
+            <span className="text-xs text-slate-500 font-medium hidden sm:block">
+              Rule: Confirmed only upon HMS HTTP 200 response
             </span>
-          </div>
-        </div>
+          }
+        />
 
         {/* Action Status Metric Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

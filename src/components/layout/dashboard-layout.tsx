@@ -18,13 +18,16 @@ export function DashboardLayout({
   onRefresh,
 }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = React.useState(false);
+  const [mobileOpen, setMobileOpen] = React.useState(false);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#F5F8FC]">
-      {/* Sidebar */}
+      {/* Sidebar (Desktop + Mobile Drawer) */}
       <Sidebar
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed(!collapsed)}
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -33,8 +36,9 @@ export function DashboardLayout({
           selectedDateRange={selectedDateRange}
           onDateRangeChange={onDateRangeChange}
           onRefresh={onRefresh}
+          onToggleMobileMenu={() => setMobileOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );
