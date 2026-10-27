@@ -37,4 +37,35 @@ describe("KpiMetricCard", () => {
 
     expect(screen.getByText("Malayalam")).toBeInTheDocument();
   });
+
+  it("renders accessible tooltip and demo data indicator when enabled", () => {
+    render(
+      <KpiMetricCard
+        title="Appointments Booked"
+        value={312}
+        icon={PhoneCall}
+        tooltip="Confirmed outpatient consultations registered into HMS"
+        isDemoData={true}
+      />
+    );
+
+    expect(
+      screen.getByText("Confirmed outpatient consultations registered into HMS")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Demo")).toBeInTheDocument();
+  });
+
+  it("renders as link when href is passed", () => {
+    render(
+      <KpiMetricCard
+        title="Transferred to Staff"
+        value={142}
+        icon={PhoneCall}
+        href="/calls?status=TRANSFERRED"
+      />
+    );
+
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "/calls?status=TRANSFERRED");
+  });
 });
