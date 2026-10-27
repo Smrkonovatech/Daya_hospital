@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import * as React from "react";
 import { PhoneCall } from "lucide-react";
 import { KpiMetricCard } from "./kpi-metric-card";
