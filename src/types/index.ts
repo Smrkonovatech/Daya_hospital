@@ -194,6 +194,14 @@ export interface ActionWebhookEvent {
 }
 
 export type KnowledgeCategory =
+  | "HOSPITAL_INFORMATION"
+  | "DEPARTMENTS_SERVICES"
+  | "DOCTOR_INFORMATION"
+  | "CONSULTATION_FEES"
+  | "TIMINGS_LOCATIONS"
+  | "APPOINTMENT_POLICIES"
+  | "FAQS"
+  | "CONTACT_ESCALATION"
   | "DEPARTMENTS"
   | "DOCTORS_SCHEDULE"
   | "FEES_CHARGES"
@@ -201,7 +209,17 @@ export type KnowledgeCategory =
   | "EMERGENCY_AMBULANCE"
   | "INSURANCE_TPA";
 
-export type KnowledgeStatus = "DRAFT" | "UNDER_REVIEW" | "PUBLISHED" | "ARCHIVED";
+export type KnowledgeStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED" | "UNDER_REVIEW";
+
+export interface KnowledgeAuditEntry {
+  version: number;
+  updatedBy: string;
+  timestamp: string;
+  summaryOfChanges: string;
+  action?: "CREATED" | "EDITED_DRAFT" | "PUBLISHED" | "ARCHIVED" | "RESTORED";
+  previousStatus?: KnowledgeStatus;
+  newStatus?: KnowledgeStatus;
+}
 
 export interface KnowledgeArticle {
   id: string;
@@ -210,19 +228,23 @@ export interface KnowledgeArticle {
   category: KnowledgeCategory;
   summary: string;
   content: string;
-  contentMalayalam: string;
+  contentMalayalam?: string;
+  sourceReference?: string;
+  internalNotes?: string;
   status: KnowledgeStatus;
   version: number;
   lastUpdatedBy: string;
   updatedAt: string;
+  lastPublishedAt?: string;
+  lastPublishedBy?: string;
+  publishedContent?: string;
+  publishedContentMalayalam?: string;
+  hasUnpublishedChanges?: boolean;
   syncedToSarvam: boolean;
+  syncStatus?: "SYNCED" | "NOT_SYNCED_DEMO" | "PENDING_PUBLISH" | "FAILED";
   lastSyncedAt?: string;
-  auditHistory: {
-    version: number;
-    updatedBy: string;
-    timestamp: string;
-    summaryOfChanges: string;
-  }[];
+  isDemoData?: boolean;
+  auditHistory: KnowledgeAuditEntry[];
 }
 
 export interface SystemHealthStatus {

@@ -5,11 +5,17 @@ import {
   BookOpen,
   Search,
   Plus,
-  RefreshCw,
   History,
   Edit3,
   Check,
   AlertCircle,
+  Eye,
+  Send,
+  Archive,
+  FileText,
+  Clock,
+  User,
+  Filter,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,46 +23,134 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { MOCK_KNOWLEDGE_ARTICLES } from "@/lib/mock-data";
-import { KnowledgeArticle, KnowledgeCategory, KnowledgeStatus } from "@/types";
+import { KnowledgeArticle } from "@/types";
 import { formatDateTime } from "@/lib/utils";
+import {
+  KNOWLEDGE_CATEGORY_CONFIG,
+  KnowledgeFormData,
+} from "@/lib/validations/knowledge-schema";
+import { HealthcareSafeguardsNotice } from "@/components/knowledge/healthcare-safeguards-notice";
+import { KnowledgeEditorModal } from "@/components/knowledge/knowledge-editor-modal";
+import { KnowledgePreviewModal } from "@/components/knowledge/knowledge-preview-modal";
+import { KnowledgePublishModal } from "@/components/knowledge/knowledge-publish-modal";
+import { KnowledgeAuditModal } from "@/components/knowledge/knowledge-audit-modal";
+import { SarvamSyncStatusCard } from "@/components/knowledge/sarvam-sync-status-card";
+import { SarvamSyncResult } from "@/lib/integrations/sarvam/knowledge-sync";
 
 export default function KnowledgeBasePage() {
   const { showToast } = useToast();
-  const [articles, setArticles] = React.useState<KnowledgeArticle[]>(MOCK_KNOWLEDGE_ARTICLES);
+
+  const [articles, setArticles] = React.useState<KnowledgeArticle[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [selectedCategory, setSelectedCategory] = React.useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = React.useState<string>("ALL");
-  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [selectedSyncStatus, setSelectedSyncStatus] = React.useState<string>("ALL");
 
-  // Modals
-  const [editingArticle, setEditingArticle] = React.useState<KnowledgeArticle | null>(null);
+  // Sync state
+  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [syncResult, setSyncResult] = React.useState<SarvamSyncResult | null>(null);
+
+  // Modals state
+  const [editorArticle, setEditorArticle] = React.useState<KnowledgeArticle | null>(null);
   const [isEditorOpen, setIsEditorOpen] = React.useState(false);
-  const [isNewArticle, setIsNewArticle] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const [previewData, setPreviewData] = React.useState<KnowledgeFormData | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
+
+  const [publishArticle, setPublishArticle] = React.useState<KnowledgeArticle | null>(null);
+  const [isPublishModalOpen, setIsPublishModalOpen] = React.useState(false);
+  const [isPublishing, setIsPublishing] = React.useState(false);
+
   const [auditArticle, setAuditArticle] = React.useState<KnowledgeArticle | null>(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = React.useState(false);
 
-  // Form State
-  const [formTitle, setFormTitle] = React.useState("");
-  const [formTitleMalayalam, setFormTitleMalayalam] = React.useState("");
-  const [formCategory, setFormCategory] = React.useState<KnowledgeCategory>("FEES_CHARGES");
-  const [formSummary, setFormSummary] = React.useState("");
-  const [formContent, setFormContent] = React.useState("");
-  const [formContentMalayalam, setFormContentMalayalam] = React.useState("");
-  const [formStatus, setFormStatus] = React.useState<KnowledgeStatus>("PUBLISHED");
-  const [formAuditNote, setFormAuditNote] = React.useState("");
+  // Reload articles helper
+  const reloadArticles = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/knowledge");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setArticles(json.data);
+      }
+    } catch (err) {
+      console.error("Failed to reload knowledge articles:", err);
+    }
+  }, []);
 
+  // Fetch articles on mount
+  React.useEffect(() => {
+    let isSubscribed = true;
+    fetch("/api/knowledge")
+      .then((res) => res.json())
+      .then((json) => {
+        if (isSubscribed && json.success && Array.isArray(json.data)) {
+          setArticles(json.data);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (isSubscribed) {
+          console.error("Failed to fetch knowledge articles:", err);
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      isSubscribed = false;
+    };
+  }, []);
+
+  // Handle Sarvam Voice Sync Check
+  const handleSyncWithSarvam = async () => {
+    try {
+      setIsSyncing(true);
+      const res = await fetch("/api/knowledge/sync", { method: "POST" });
+      const json = await res.json();
+
+      if (json.success && json.syncResult) {
+        setSyncResult(json.syncResult);
+        await reloadArticles();
+
+        if (json.syncResult.mode === "DEMO_MODE") {
+          showToast({
+            type: "info",
+            title: "Demo Mode: Local Save Only",
+            message:
+              "Sarvam AI knowledge sync endpoint is unconfigured. Content is safely held in local hospital DB (Demo mode). No false success issued.",
+          });
+        } else {
+          showToast({
+            type: "success",
+            title: "Sarvam Voice Sync Complete",
+            message: json.syncResult.message,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+      showToast({
+        type: "error",
+        title: "Sync Error",
+        message: "Failed to invoke Sarvam sync adapter.",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Filtered Articles
   const filteredArticles = React.useMemo(() => {
     return articles.filter((art) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesTitle = art.title.toLowerCase().includes(q);
-        const matchesMal = art.titleMalayalam.toLowerCase().includes(q);
+        const matchesMal = art.titleMalayalam?.toLowerCase().includes(q);
         const matchesContent = art.content.toLowerCase().includes(q);
         const matchesSummary = art.summary.toLowerCase().includes(q);
-        if (!matchesTitle && !matchesMal && !matchesContent && !matchesSummary) {
+        const matchesSource = art.sourceReference?.toLowerCase().includes(q);
+        if (!matchesTitle && !matchesMal && !matchesContent && !matchesSummary && !matchesSource) {
           return false;
         }
       }
@@ -69,147 +163,218 @@ export default function KnowledgeBasePage() {
         return false;
       }
 
+      if (selectedSyncStatus !== "ALL") {
+        if (selectedSyncStatus === "SYNCED" && !art.syncedToSarvam) return false;
+        if (selectedSyncStatus === "NOT_SYNCED" && art.syncedToSarvam) return false;
+      }
+
       return true;
     });
-  }, [articles, searchQuery, selectedCategory, selectedStatus]);
+  }, [articles, searchQuery, selectedCategory, selectedStatus, selectedSyncStatus]);
 
-  const handleSyncToSarvam = () => {
-    setIsSyncing(true);
-    setTimeout(() => {
-      setIsSyncing(false);
-      setArticles((prev) =>
-        prev.map((a) => ({
-          ...a,
-          syncedToSarvam: true,
-          lastSyncedAt: new Date().toISOString(),
-        }))
-      );
-      showToast({
-        type: "success",
-        title: "Synced with Sarvam Voice Agent",
-        message: "5 approved clinical articles compiled to Malayalam LLM context.",
-      });
-    }, 1200);
-  };
-
-  const handleOpenEdit = (article: KnowledgeArticle) => {
-    setEditingArticle(article);
-    setIsNewArticle(false);
-    setFormTitle(article.title);
-    setFormTitleMalayalam(article.titleMalayalam);
-    setFormCategory(article.category);
-    setFormSummary(article.summary);
-    setFormContent(article.content);
-    setFormContentMalayalam(article.contentMalayalam);
-    setFormStatus(article.status);
-    setFormAuditNote("");
-    setIsEditorOpen(true);
-  };
-
+  // Open Editor for New Article
   const handleOpenNew = () => {
-    setEditingArticle(null);
-    setIsNewArticle(true);
-    setFormTitle("");
-    setFormTitleMalayalam("");
-    setFormCategory("DEPARTMENTS");
-    setFormSummary("");
-    setFormContent("");
-    setFormContentMalayalam("");
-    setFormStatus("DRAFT");
-    setFormAuditNote("Initial creation.");
+    setEditorArticle(null);
     setIsEditorOpen(true);
   };
 
-  const handleSaveArticle = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formTitle || !formContent) {
-      alert("Please fill in the title and content.");
+  // Open Editor for Existing Article
+  const handleOpenEdit = (article: KnowledgeArticle) => {
+    setEditorArticle(article);
+    setIsEditorOpen(true);
+  };
+
+  // Save Draft Submission
+  const handleSaveDraft = async (data: KnowledgeFormData) => {
+    try {
+      setIsSaving(true);
+      if (!editorArticle) {
+        // Create new article
+        const res = await fetch("/api/knowledge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...data,
+            authorName: "Hospital Content Editor",
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          showToast({
+            type: "success",
+            title: "Draft Article Created",
+            message: `New article "${data.title}" saved. Version 1 ready for review.`,
+          });
+          await reloadArticles();
+          setIsEditorOpen(false);
+        } else {
+          throw new Error(json.error || "Failed to create article");
+        }
+      } else {
+        // Update existing article draft
+        const res = await fetch(`/api/knowledge/${editorArticle.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...data,
+            authorName: "Hospital Content Editor",
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          showToast({
+            type: "info",
+            title: "Draft Revision Saved",
+            message:
+              editorArticle.status === "PUBLISHED"
+                ? "Revisions saved safely as draft. Approved live version callers hear remains active until publication."
+                : "Draft revisions saved successfully.",
+          });
+          await reloadArticles();
+          setIsEditorOpen(false);
+        } else {
+          throw new Error(json.error || "Failed to update article");
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Save failed";
+      showToast({ type: "error", title: "Save Failed", message: msg });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Trigger Publish confirmation from Editor
+  const handleTriggerPublishFromEditor = (data: KnowledgeFormData) => {
+    // If article exists, use it; if new, we first save draft then publish
+    if (editorArticle) {
+      setPublishArticle(editorArticle);
+      setIsPublishModalOpen(true);
+    } else {
+      // Save draft first then open publish modal
+      handleSaveDraft(data).then(() => {
+        showToast({
+          type: "info",
+          title: "Draft Saved",
+          message: "Please click 'Publish Live' on the created article to authorise publication.",
+        });
+      });
+    }
+  };
+
+  // Open Publish Modal directly from card
+  const handleOpenPublish = (article: KnowledgeArticle) => {
+    setPublishArticle(article);
+    setIsPublishModalOpen(true);
+  };
+
+  // Confirm and Execute Publication
+  const handleConfirmPublish = async (authorName: string, changeNote: string) => {
+    if (!publishArticle) return;
+    try {
+      setIsPublishing(true);
+      const res = await fetch(`/api/knowledge/${publishArticle.id}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authorName, changeNote }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast({
+          type: "success",
+          title: "Published to Live Voice Grounding",
+          message: `Article published as Version v${json.data.version}. Active for Malayalam AI caller responses.`,
+        });
+        await reloadArticles();
+        setIsPublishModalOpen(false);
+        setIsEditorOpen(false);
+      } else {
+        throw new Error(json.error || "Publication failed");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Publication failed";
+      showToast({ type: "error", title: "Publication Failed", message: msg });
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  // Handle Archive Action
+  const handleArchive = async (article: KnowledgeArticle) => {
+    if (
+      !confirm(
+        `Are you sure you want to archive "${article.title}"? It will be removed from active AI voice grounding.`
+      )
+    ) {
       return;
     }
-
-    if (isNewArticle) {
-      const newArt: KnowledgeArticle = {
-        id: `kb_${Date.now().toString().slice(-4)}`,
-        title: formTitle,
-        titleMalayalam: formTitleMalayalam || formTitle,
-        category: formCategory,
-        summary: formSummary,
-        content: formContent,
-        contentMalayalam: formContentMalayalam,
-        status: formStatus,
-        version: 1,
-        lastUpdatedBy: "Dr. Anjali Menon",
-        updatedAt: new Date().toISOString(),
-        syncedToSarvam: false,
-        auditHistory: [
-          {
-            version: 1,
-            updatedBy: "Dr. Anjali Menon",
-            timestamp: new Date().toISOString(),
-            summaryOfChanges: formAuditNote || "Created approved hospital guidance.",
-          },
-        ],
-      };
-      setArticles([newArt, ...articles]);
-      showToast({
-        type: "success",
-        title: "Article Created",
-        message: `Version 1 saved. Pending sync to Sarvam AI.`,
+    try {
+      const res = await fetch(`/api/knowledge/${article.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          authorName: "Hospital Content Editor",
+          reason: "Archived from active voice grounding by staff.",
+        }),
       });
-    } else if (editingArticle) {
-      const nextVersion = editingArticle.version + 1;
-      const updated: KnowledgeArticle = {
-        ...editingArticle,
-        title: formTitle,
-        titleMalayalam: formTitleMalayalam,
-        category: formCategory,
-        summary: formSummary,
-        content: formContent,
-        contentMalayalam: formContentMalayalam,
-        status: formStatus,
-        version: nextVersion,
-        lastUpdatedBy: "Dr. Anjali Menon",
-        updatedAt: new Date().toISOString(),
-        syncedToSarvam: false,
-        auditHistory: [
-          {
-            version: nextVersion,
-            updatedBy: "Dr. Anjali Menon",
-            timestamp: new Date().toISOString(),
-            summaryOfChanges:
-              formAuditNote || `Version ${nextVersion} content revision.`,
-          },
-          ...editingArticle.auditHistory,
-        ],
-      };
-      setArticles((prev) =>
-        prev.map((a) => (a.id === editingArticle.id ? updated : a))
-      );
+      const json = await res.json();
+      if (json.success) {
+        showToast({
+          type: "info",
+          title: "Article Archived",
+          message: `"${article.title}" has been archived and removed from voice grounding.`,
+        });
+        await reloadArticles();
+      }
+    } catch (err) {
+      console.error("Archive error:", err);
       showToast({
-        type: "info",
-        title: "Article Updated",
-        message: `Version ${nextVersion} saved with audit note.`,
+        type: "error",
+        title: "Archive Failed",
+        message: "Failed to archive article.",
       });
     }
-
-    setIsEditorOpen(false);
   };
 
+  // Handle Preview
+  const handleOpenPreview = (data: KnowledgeFormData) => {
+    setPreviewData(data);
+    setIsPreviewOpen(true);
+  };
+
+  const handleOpenPreviewFromArticle = (article: KnowledgeArticle) => {
+    setPreviewData({
+      title: article.title,
+      titleMalayalam: article.titleMalayalam,
+      category: article.category,
+      summary: article.summary,
+      content: article.content,
+      contentMalayalam: article.contentMalayalam || "",
+      sourceReference: article.sourceReference || "",
+      internalNotes: article.internalNotes || "",
+      status: article.status,
+    });
+    setIsPreviewOpen(true);
+  };
+
+  // Handle Audit History
   const handleOpenAudit = (article: KnowledgeArticle) => {
     setAuditArticle(article);
     setIsAuditModalOpen(true);
   };
+
+  const totalPublished = articles.filter((a) => a.status === "PUBLISHED").length;
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Page Header */}
         <PageHeader
-          title="Hospital Approved Knowledge Base"
-          description="Authorized clinical timetables, consultation fees, IP policies, and Malayalam pronunciation guidelines used for Sarvam AI grounding."
+          title="Hospital Knowledge Base & AI Voice Grounding"
+          description="Approved hospital information, OPD consultation fees, visiting policies, and Malayalam pronunciation guidelines used by the Sarvam AI voice assistant."
           badge={
             <Badge variant="teal" size="sm">
-              Sarvam Grounding Source
+              Authoritative Grounding Source
             </Badge>
           }
           breadcrumbs={[
@@ -219,23 +384,10 @@ export default function KnowledgeBasePage() {
           actions={
             <div className="flex items-center gap-2">
               <Button
-                variant="default"
-                size="sm"
-                onClick={handleSyncToSarvam}
-                disabled={isSyncing}
-                className="gap-2 text-xs bg-[#0C5DB8]"
-              >
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`}
-                />
-                <span>{isSyncing ? "Syncing..." : "Sync to AI Voice Agent"}</span>
-              </Button>
-
-              <Button
                 variant="outline"
                 size="sm"
                 onClick={handleOpenNew}
-                className="gap-1.5 text-xs text-[#0C5DB8]"
+                className="gap-1.5 text-xs text-[#0C5DB8] border-blue-200 hover:bg-blue-50"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>New Article</span>
@@ -244,14 +396,25 @@ export default function KnowledgeBasePage() {
           }
         />
 
-        {/* Search & Category Filter */}
+        {/* 1. Healthcare Safeguards Notice Banner */}
+        <HealthcareSafeguardsNotice />
+
+        {/* 2. Sarvam Voice Sync Status Card (Decoupled sync, avoiding false success) */}
+        <SarvamSyncStatusCard
+          syncResult={syncResult}
+          isSyncing={isSyncing}
+          onSync={handleSyncWithSarvam}
+          totalApproved={totalPublished}
+        />
+
+        {/* 3. Search and Multi-Category Filters */}
         <Card>
           <CardContent className="p-4 space-y-3">
             <div className="flex flex-col sm:flex-row items-center gap-3">
               <div className="relative flex-1 w-full">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <Input
-                  placeholder="Search knowledge base in English or മലയാളം..."
+                  placeholder="Search knowledge base in English, മലയാളം, or circular reference..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9 text-xs"
@@ -260,36 +423,62 @@ export default function KnowledgeBasePage() {
 
               {/* Status Selector */}
               <div className="flex items-center gap-1.5 text-xs w-full sm:w-auto">
-                <span className="text-slate-500">Status:</span>
+                <span className="text-slate-500 shrink-0">Status:</span>
                 <select
                   value={selectedStatus}
                   onChange={(e) => setSelectedStatus(e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
                 >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PUBLISHED">Published</option>
-                  <option value="UNDER_REVIEW">Under Review</option>
-                  <option value="DRAFT">Draft</option>
+                  <option value="ALL">All Statuses ({articles.length})</option>
+                  <option value="PUBLISHED">
+                    Published ({articles.filter((a) => a.status === "PUBLISHED").length})
+                  </option>
+                  <option value="DRAFT">
+                    Draft ({articles.filter((a) => a.status === "DRAFT").length})
+                  </option>
+                  <option value="ARCHIVED">
+                    Archived ({articles.filter((a) => a.status === "ARCHIVED").length})
+                  </option>
+                </select>
+              </div>
+
+              {/* Sync Filter */}
+              <div className="flex items-center gap-1.5 text-xs w-full sm:w-auto">
+                <span className="text-slate-500 shrink-0">Sync:</span>
+                <select
+                  value={selectedSyncStatus}
+                  onChange={(e) => setSelectedSyncStatus(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
+                >
+                  <option value="ALL">All Modes</option>
+                  <option value="NOT_SYNCED">Demo Mode / Local Only</option>
+                  <option value="SYNCED">Synced to Voice</option>
                 </select>
               </div>
             </div>
 
-            {/* Category Pills */}
-            <div className="flex items-center gap-1 overflow-x-auto pt-1 text-xs border-t border-slate-100">
+            {/* 8 Categories Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pt-2 text-xs border-t border-slate-100 pb-1">
+              <span className="text-[11px] font-semibold text-slate-400 shrink-0 flex items-center gap-1 mr-1">
+                <Filter className="h-3 w-3" /> Categories:
+              </span>
               {[
                 { id: "ALL", label: "All Topics" },
-                { id: "DOCTORS_SCHEDULE", label: "Doctor Schedules" },
-                { id: "FEES_CHARGES", label: "OPD & Doctor Fees" },
-                { id: "HOSPITAL_POLICIES", label: "Visiting & IP Policies" },
-                { id: "INSURANCE_TPA", label: "Insurance & Ayushman" },
-                { id: "EMERGENCY_AMBULANCE", label: "Emergency & Casualty" },
+                { id: "HOSPITAL_INFORMATION", label: "Hospital Information" },
+                { id: "DEPARTMENTS_SERVICES", label: "Departments & Services" },
+                { id: "DOCTOR_INFORMATION", label: "Doctor Information" },
+                { id: "CONSULTATION_FEES", label: "Consultation & Fees" },
+                { id: "TIMINGS_LOCATIONS", label: "Timings & Locations" },
+                { id: "APPOINTMENT_POLICIES", label: "Appointment Policies" },
+                { id: "FAQS", label: "Patient FAQs" },
+                { id: "CONTACT_ESCALATION", label: "Contact & Escalation" },
               ].map((cat) => (
                 <button
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`rounded-md px-3 py-1 font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`rounded-md px-2.5 py-1 font-medium transition-colors whitespace-nowrap cursor-pointer text-[11px] ${
                     selectedCategory === cat.id
-                      ? "bg-[#0C5DB8] text-white"
+                      ? "bg-[#0C5DB8] text-white shadow-2xs"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
@@ -300,296 +489,259 @@ export default function KnowledgeBasePage() {
           </CardContent>
         </Card>
 
-        {/* Knowledge Articles Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredArticles.map((article) => (
-            <Card
-              key={article.id}
-              className="flex flex-col justify-between hover:border-slate-300 transition-all shadow-2xs"
-            >
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <Badge variant="teal" size="sm">
-                      {article.category.replace(/_/g, " ")}
-                    </Badge>
-                    <CardTitle className="text-sm font-semibold text-slate-900 mt-1 leading-snug">
-                      {article.title}
-                    </CardTitle>
-                    <p className="text-xs font-medium text-[#0E7A71]">
-                      {article.titleMalayalam}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
-                      v{article.version}
-                    </span>
-                    <Badge
-                      variant={article.status === "PUBLISHED" ? "success" : "warning"}
-                      size="sm"
-                    >
-                      {article.status}
-                    </Badge>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent className="pt-0 space-y-3">
-                <p className="text-xs text-slate-600 line-clamp-2">
-                  {article.summary}
-                </p>
-
-                {/* Excerpt */}
-                <div className="rounded-lg bg-slate-50 p-2.5 text-[11px] text-slate-700 font-mono line-clamp-3 leading-relaxed border border-slate-100">
-                  {article.content}
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    {article.syncedToSarvam ? (
-                      <span className="flex items-center gap-1 text-emerald-700 font-medium">
-                        <Check className="h-3 w-3" />
-                        Synced to Voice
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-amber-700 font-medium">
-                        <AlertCircle className="h-3 w-3" />
-                        Pending Sync
-                      </span>
-                    )}
-                  </div>
-                  <span>Updated {formatDateTime(article.updatedAt)}</span>
-                </div>
-              </CardContent>
-
-              {/* Action buttons */}
-              <div className="flex items-center justify-between p-4 pt-0 border-t border-slate-100 mt-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleOpenAudit(article)}
-                  className="h-7 text-xs text-slate-600 gap-1.5"
-                >
-                  <History className="h-3.5 w-3.5" />
-                  <span>Audit History ({article.auditHistory.length})</span>
-                </Button>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenEdit(article)}
-                  className="h-7 text-xs text-[#0C5DB8] gap-1.5"
-                >
-                  <Edit3 className="h-3.5 w-3.5" />
-                  <span>Edit Content</span>
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {/* Article Editor Modal */}
-      <Modal
-        isOpen={isEditorOpen}
-        onClose={() => setIsEditorOpen(false)}
-        maxWidth="2xl"
-        title={
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-[#0C5DB8]" />
-            <span>
-              {isNewArticle
-                ? "Create Approved Hospital Guidance"
-                : `Edit Article: ${editingArticle?.title}`}
-            </span>
+        {/* 4. Articles Grid */}
+        {isLoading ? (
+          <div className="p-12 text-center text-xs text-slate-400">
+            Loading knowledge articles...
           </div>
-        }
-        description="All changes are version-controlled and verified before updating the Sarvam Malayalam AI calling prompt context"
-      >
-        <form onSubmit={handleSaveArticle} className="space-y-4 text-xs">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Article Title (English) *
-              </label>
-              <Input
-                value={formTitle}
-                onChange={(e) => setFormTitle(e.target.value)}
-                placeholder="e.g. Doctor Consultation & Registration Fees"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Title in Malayalam (മലയാളം)
-              </label>
-              <Input
-                value={formTitleMalayalam}
-                onChange={(e) => setFormTitleMalayalam(e.target.value)}
-                placeholder="e.g. ഒപി രജിസ്ട്രേഷനും ഡോക്ടർ കൺസൾട്ടേഷൻ ഫീസും"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Hospital Category *
-              </label>
-              <select
-                value={formCategory}
-                onChange={(e) => setFormCategory(e.target.value as KnowledgeCategory)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
-              >
-                <option value="FEES_CHARGES">Fees & Registration Charges</option>
-                <option value="DOCTORS_SCHEDULE">Doctors OPD Schedule</option>
-                <option value="HOSPITAL_POLICIES">Hospital & Visiting Policies</option>
-                <option value="INSURANCE_TPA">Insurance & TPA Desks</option>
-                <option value="EMERGENCY_AMBULANCE">Emergency & Ambulance</option>
-                <option value="DEPARTMENTS">Departments & Specialities</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Publication Status *
-              </label>
-              <select
-                value={formStatus}
-                onChange={(e) => setFormStatus(e.target.value as KnowledgeStatus)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
-              >
-                <option value="PUBLISHED">Published (Grounding Active)</option>
-                <option value="UNDER_REVIEW">Under Review</option>
-                <option value="DRAFT">Draft</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Short Summary
-            </label>
-            <Input
-              value={formSummary}
-              onChange={(e) => setFormSummary(e.target.value)}
-              placeholder="Brief summary for quick staff review"
-            />
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Approved Content (English Guidelines) *
-            </label>
-            <textarea
-              value={formContent}
-              onChange={(e) => setFormContent(e.target.value)}
-              rows={4}
-              required
-              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 font-mono text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
-              placeholder="Enter exact hospital policies, timing, and fee structures..."
-            />
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Malayalam Voice Phrasing / Malayalam Content (മലയാളം)
-            </label>
-            <textarea
-              value={formContentMalayalam}
-              onChange={(e) => setFormContentMalayalam(e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
-              placeholder="Enter Malayalam pronunciation and spoken script for Sarvam AI..."
-            />
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700 block mb-1">
-              Mandatory Audit Note (Summary of changes for clinical record) *
-            </label>
-            <Input
-              value={formAuditNote}
-              onChange={(e) => setFormAuditNote(e.target.value)}
-              placeholder="e.g. Revised super-speciality fee as per board circular #2026/18"
-              required
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+        ) : filteredArticles.length === 0 ? (
+          <Card className="p-8 text-center space-y-2">
+            <BookOpen className="h-8 w-8 text-slate-300 mx-auto" />
+            <h4 className="text-sm font-semibold text-slate-700">No matching articles found</h4>
+            <p className="text-xs text-slate-500">
+              Try adjusting your search criteria or category filter.
+            </p>
             <Button
-              type="button"
               variant="outline"
               size="sm"
-              onClick={() => setIsEditorOpen(false)}
+              onClick={() => {
+                setSearchQuery("");
+                setSelectedCategory("ALL");
+                setSelectedStatus("ALL");
+                setSelectedSyncStatus("ALL");
+              }}
+              className="mt-2 text-xs"
             >
-              Cancel
+              Reset Filters
             </Button>
-            <Button
-              type="submit"
-              variant="default"
-              size="sm"
-              className="bg-[#0C5DB8]"
-            >
-              Save & Create Version
-            </Button>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredArticles.map((article) => {
+              const catConfig = KNOWLEDGE_CATEGORY_CONFIG[article.category] || {
+                label: article.category,
+                labelMalayalam: "",
+                badgeColor: "bg-slate-100 text-slate-700",
+              };
+
+              return (
+                <Card
+                  key={article.id}
+                  className="flex flex-col justify-between hover:border-slate-300 transition-all shadow-2xs relative"
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`rounded px-2 py-0.5 text-[10px] font-semibold border ${catConfig.badgeColor}`}
+                          >
+                            {catConfig.label}
+                          </span>
+
+                          {article.isDemoData && (
+                            <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
+                              Demo Data
+                            </span>
+                          )}
+
+                          {article.hasUnpublishedChanges && (
+                            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 border border-rose-200 animate-pulse">
+                              Draft Revision Pending
+                            </span>
+                          )}
+                        </div>
+
+                        <CardTitle className="text-sm font-semibold text-slate-900 mt-1 leading-snug">
+                          {article.title}
+                        </CardTitle>
+                        {article.titleMalayalam && (
+                          <p className="text-xs font-medium text-[#0E7A71]">
+                            {article.titleMalayalam}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
+                          v{article.version}
+                        </span>
+                        <Badge
+                          variant={
+                            article.status === "PUBLISHED"
+                              ? "success"
+                              : article.status === "DRAFT"
+                              ? "warning"
+                              : "secondary"
+                          }
+                          size="sm"
+                        >
+                          {article.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="pt-0 space-y-3">
+                    <p className="text-xs text-slate-600 line-clamp-2">
+                      {article.summary}
+                    </p>
+
+                    {/* Excerpt / Spoken guidelines snippet */}
+                    <div className="rounded-lg bg-slate-50 p-2.5 text-[11px] text-slate-700 font-mono line-clamp-3 leading-relaxed border border-slate-100">
+                      {article.content}
+                    </div>
+
+                    {/* Source reference if present */}
+                    {article.sourceReference && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                        <FileText className="h-3 w-3 text-slate-400" />
+                        <span>Source: {article.sourceReference}</span>
+                      </div>
+                    )}
+
+                    {/* Metadata line: Updated and Published stamps */}
+                    <div className="flex flex-col gap-1 text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          {article.syncedToSarvam ? (
+                            <span className="flex items-center gap-1 text-emerald-700 font-medium">
+                              <Check className="h-3 w-3" />
+                              Synced to Voice
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-amber-700 font-medium">
+                              <AlertCircle className="h-3 w-3" />
+                              Demo Mode (Not Synced)
+                            </span>
+                          )}
+                        </div>
+
+                        <span className="flex items-center gap-1">
+                          <User className="h-3 w-3 text-slate-400" />
+                          <span>{article.lastUpdatedBy}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>Updated {formatDateTime(article.updatedAt)}</span>
+                        </span>
+                        {article.lastPublishedAt ? (
+                          <span className="text-emerald-700">
+                            Live v{article.version} ({formatDateTime(article.lastPublishedAt)})
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 font-medium">Draft — Not published</span>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center justify-between p-3.5 pt-2 border-t border-slate-100 mt-2 bg-slate-50/50 rounded-b-xl gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleOpenAudit(article)}
+                        className="h-7 text-xs text-slate-600 gap-1 px-2"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        <span>Audit ({article.auditHistory.length})</span>
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleOpenPreviewFromArticle(article)}
+                        className="h-7 text-xs text-slate-600 gap-1 px-2"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>Preview</span>
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {article.status !== "ARCHIVED" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleArchive(article)}
+                          className="h-7 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2"
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          <span>Archive</span>
+                        </Button>
+                      )}
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenEdit(article)}
+                        className="h-7 text-xs text-[#0C5DB8] border-blue-200 hover:bg-blue-50 gap-1 px-2.5"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        <span>Edit</span>
+                      </Button>
+
+                      {/* Explicit Publish Action Button */}
+                      {(article.status === "DRAFT" || article.hasUnpublishedChanges) && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleOpenPublish(article)}
+                          className="h-7 text-xs bg-[#0C5DB8] hover:bg-[#0A4D98] text-white gap-1 px-2.5"
+                        >
+                          <Send className="h-3 w-3" />
+                          <span>Publish</span>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
-        </form>
-      </Modal>
+        )}
+      </div>
+
+      {/* Editor Modal with Zod & React Hook Form */}
+      <KnowledgeEditorModal
+        isOpen={isEditorOpen}
+        onClose={() => setIsEditorOpen(false)}
+        article={editorArticle}
+        onSaveDraft={handleSaveDraft}
+        onTriggerPublish={handleTriggerPublishFromEditor}
+        onPreview={handleOpenPreview}
+        isSaving={isSaving}
+      />
+
+      {/* Preview Modal */}
+      {previewData && (
+        <KnowledgePreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          data={previewData}
+        />
+      )}
+
+      {/* Authorized Publication Modal */}
+      <KnowledgePublishModal
+        isOpen={isPublishModalOpen}
+        onClose={() => setIsPublishModalOpen(false)}
+        article={publishArticle}
+        onConfirmPublish={handleConfirmPublish}
+        isPublishing={isPublishing}
+      />
 
       {/* Audit History Modal */}
-      {auditArticle && (
-        <Modal
-          isOpen={isAuditModalOpen}
-          onClose={() => setIsAuditModalOpen(false)}
-          maxWidth="lg"
-          title={
-            <div className="flex items-center gap-2">
-              <History className="h-5 w-5 text-[#0C5DB8]" />
-              <span>Version Audit Trail: {auditArticle.title}</span>
-            </div>
-          }
-          description="Regulatory change log and revision provenance"
-        >
-          <div className="space-y-3 text-xs">
-            {auditArticle.auditHistory.map((item, idx) => (
-              <div
-                key={idx}
-                className="relative flex gap-3 pb-3 border-b border-slate-100 last:border-b-0"
-              >
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#E8F2FC] text-[#0C5DB8] font-bold text-xs shrink-0">
-                  v{item.version}
-                </div>
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900">
-                      {item.updatedBy}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {formatDateTime(item.timestamp)}
-                    </span>
-                  </div>
-                  <p className="text-slate-600 leading-snug">
-                    {item.summaryOfChanges}
-                  </p>
-                </div>
-              </div>
-            ))}
-
-            <div className="flex justify-end pt-2 border-t border-slate-100">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsAuditModalOpen(false)}
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      <KnowledgeAuditModal
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        article={auditArticle}
+      />
     </DashboardLayout>
   );
 }

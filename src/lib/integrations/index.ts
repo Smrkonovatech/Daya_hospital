@@ -7,6 +7,12 @@ export * from "./types";
 export { MockDayaHmsAdapter } from "./hms/mock-adapter";
 export { MockSarvamVoiceAdapter } from "./sarvam/mock-adapter";
 export { MockTelephonyIvrAdapter } from "./ivr/mock-adapter";
+export {
+  SarvamKnowledgeSyncAdapter,
+  sarvamKnowledgeSync,
+  type ISarvamKnowledgeSyncAdapter,
+  type SarvamSyncResult,
+} from "./sarvam/knowledge-sync";
 
 class IntegrationRegistry {
   private hmsAdapter: IDayaHmsAdapter;
