@@ -63,6 +63,15 @@ export interface AiActionSummary {
   timestamp: string;
 }
 
+export interface CallReviewEntry {
+  id: string;
+  reviewerId: string;
+  reviewerName: string;
+  action: "REVIEWED" | "NOTE_ADDED" | "FOLLOW_UP_REQUESTED" | "FOLLOW_UP_RESOLVED";
+  notes?: string;
+  timestamp: string;
+}
+
 export interface CallRecord {
   id: string;
   externalCallId: string;
@@ -86,6 +95,10 @@ export interface CallRecord {
   assignedStaff?: string;
   hmsTransactionRef?: string;
   actions: AiActionSummary[];
+  isReviewed?: boolean;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewHistory?: CallReviewEntry[];
 }
 
 export interface AiActionDetail {
