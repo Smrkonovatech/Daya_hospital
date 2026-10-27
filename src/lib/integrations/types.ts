@@ -7,6 +7,101 @@ export interface IntegrationHealth {
   details?: string;
 }
 
+// ----------------------------------------------------
+// A. SARVAM AI VOICE TYPES
+// ----------------------------------------------------
+
+export interface SarvamTranscriptTurn {
+  id: string;
+  speaker: "agent" | "caller" | "system";
+  text: string;
+  textMalayalam?: string;
+  timestampMs: number;
+  confidence?: number;
+}
+
+export interface SarvamSummary {
+  summaryMalayalam: string;
+  summaryEnglish: string;
+  primaryIntent: string;
+  intentConfidence: number;
+  detectedLanguage: "malayalam" | "manglish" | "english";
+  actionIdentified?: string;
+  requiresFollowUp: boolean;
+  followUpReason?: string;
+}
+
+export interface SarvamInteractionMetadata {
+  interactionId: string;
+  agentId: string;
+  startTime: string;
+  endTime?: string;
+  durationSeconds: number;
+  status: "COMPLETED" | "FAILED" | "IN_PROGRESS" | "TRANSFERRED";
+  callerNumber: string;
+  audioRecordingAvailable: boolean;
+  recordingUrl?: string;
+  language: string;
+}
+
+export interface SarvamWebhookPayload {
+  eventId: string;
+  eventType: "call_ended" | "call_started" | "action_event" | "speech_detected";
+  interactionId: string;
+  timestamp: string;
+  metadata?: {
+    durationSeconds?: number;
+    callerNumber?: string;
+    callStatus?: "ANSWERED" | "BUSY" | "MISSED" | "TRANSFERRED" | "FAILED" | "COMPLETED";
+    language?: string;
+  };
+  summary?: SarvamSummary;
+  transcript?: SarvamTranscriptTurn[];
+  recording?: {
+    recordingUrl?: string;
+    mimeType?: string;
+    durationSeconds?: number;
+  };
+  actions?: Array<{
+    actionId: string;
+    actionType: string;
+    status: string;
+    parameters: Record<string, unknown>;
+  }>;
+}
+
+export interface ISarvamVoiceAdapter {
+  healthCheck(): Promise<IntegrationHealth>;
+  verifyWebhookSignature(rawBody: string, signature: string): boolean;
+  getInteractionMetadata(interactionId: string): Promise<SarvamInteractionMetadata | null>;
+  getTranscript(interactionId: string): Promise<SarvamTranscriptTurn[]>;
+  getSummary(interactionId: string): Promise<SarvamSummary | null>;
+  getRecordingUrl(interactionId: string): Promise<{ url: string; mimeType: string } | null>;
+  executeTool(toolName: string, parameters: Record<string, unknown>): Promise<{ success: boolean; result: unknown; error?: string }>;
+  transcribeMalayalamAudio?(audioBuffer: Buffer): Promise<{ transcriptText: string; languageConfidence: number }>;
+  generateSpokenMalayalam?(textMalayalam: string): Promise<{ audioUrl: string; durationSecs: number }>;
+}
+
+// ----------------------------------------------------
+// B. DAYA HOSPITAL MANAGEMENT SYSTEM (HMS) TYPES
+// ----------------------------------------------------
+
+export interface Doctor {
+  doctorId: string;
+  doctorName: string;
+  department: string;
+  qualifications: string;
+  opdDays: string[];
+  consultationFee: number;
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  hodName: string;
+  roomNumbers: string;
+}
+
 export interface DoctorSlot {
   slotId: string;
   doctorId: string;
@@ -18,6 +113,14 @@ export interface DoctorSlot {
   consultationFee: number;
 }
 
+export interface Patient {
+  uhid: string;
+  name: string;
+  mobile: string;
+  age?: number;
+  gender?: string;
+}
+
 export interface BookAppointmentInput {
   doctorId: string;
   doctorName: string;
@@ -27,6 +130,7 @@ export interface BookAppointmentInput {
   patientMobile: string;
   patientName: string;
   idempotencyKey: string;
+  uhid?: string;
 }
 
 export interface BookAppointmentResult {
@@ -36,7 +140,13 @@ export interface BookAppointmentResult {
   consultationFee?: number;
   allocatedSlot?: string;
   error?: string;
-  errorCode?: "SLOT_UNAVAILABLE" | "HMS_TIMEOUT" | "PATIENT_NOT_FOUND" | "DUPLICATE_IDEMPOTENCY";
+  errorCode?:
+    | "SLOT_UNAVAILABLE"
+    | "HMS_TIMEOUT"
+    | "PATIENT_NOT_FOUND"
+    | "DUPLICATE_IDEMPOTENCY"
+    | "VALIDATION_FAILED";
+  retryAfterMs?: number;
 }
 
 export interface RescheduleAppointmentInput {
@@ -57,7 +167,10 @@ export interface CancelAppointmentResult {
 
 export interface IDayaHmsAdapter {
   healthCheck(): Promise<IntegrationHealth>;
+  getDoctors(department?: string): Promise<Doctor[]>;
+  getDepartments(): Promise<Department[]>;
   checkDoctorSlots(doctorId: string, date: string): Promise<DoctorSlot[]>;
+  lookupPatientByMobile(mobile: string): Promise<Patient | null>;
   bookAppointment(input: BookAppointmentInput): Promise<BookAppointmentResult>;
   rescheduleAppointment(input: RescheduleAppointmentInput): Promise<BookAppointmentResult>;
   cancelAppointment(bookingRef: string, idempotencyKey: string): Promise<CancelAppointmentResult>;
@@ -70,14 +183,43 @@ export interface IDayaHmsAdapter {
   }>;
 }
 
-export interface ISarvamVoiceAdapter {
-  healthCheck(): Promise<IntegrationHealth>;
-  transcribeMalayalamAudio(audioBuffer: Buffer): Promise<{ transcriptText: string; languageConfidence: number }>;
-  generateSpokenMalayalam(textMalayalam: string): Promise<{ audioUrl: string; durationSecs: number }>;
+// ----------------------------------------------------
+// C. IVR & TELEPHONY INTEGRATION TYPES
+// ----------------------------------------------------
+
+export interface TelephonyForwardResult {
+  forwarded: boolean;
+  routingSessionId: string;
+  sessionUrl: string;
+  hopCount: number;
+  rolloverReason: "ALL_AGENTS_BUSY" | "RING_TIMEOUT_20S" | "OFF_HOURS";
+}
+
+export interface TelephonyTransferResult {
+  success: boolean;
+  destinationExtension: string;
+  department: string;
+  hopCount: number;
+  error?: string;
+}
+
+export interface TelephonyTrunkStatus {
+  totalChannels: number;
+  activeChannels: number;
+  availableChannels: number;
+  trunkHealth: "HEALTHY" | "DEGRADED" | "DOWN";
 }
 
 export interface ITelephonyIvrAdapter {
   healthCheck(): Promise<IntegrationHealth>;
-  forwardToAiQueue(incomingCallId: string): Promise<{ sessionUrl: string }>;
-  transferToHumanAgent(callId: string, departmentExt: string): Promise<{ success: boolean; extension: string }>;
+  getTrunkStatus(): Promise<TelephonyTrunkStatus>;
+  forwardToAiQueue(incomingCallId: string, currentHops?: number): Promise<TelephonyForwardResult>;
+  transferToHumanAgent(callId: string, departmentExt: string, currentHops?: number): Promise<TelephonyTransferResult>;
+  getCallRoutingMetrics(): Promise<{
+    offeredToAgents: number;
+    busyRollovers: number;
+    timeoutRollovers: number;
+    aiHandled: number;
+    casualtyFallbacks: number;
+  }>;
 }

@@ -217,6 +217,49 @@ class SystemRepository {
   }
 
   /**
+   * Checks if a webhook with the given externalEventId was already processed.
+   */
+  async getWebhookByEventId(
+    eventId: string
+  ): Promise<WebhookRecord | null> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        const row = await prisma.webhookProcessingRecord.findUnique({
+          where: { externalEventId: eventId },
+        });
+        if (row) {
+          return {
+            id: row.id,
+            provider: row.provider,
+            eventType: row.eventType,
+            externalEventId: row.externalEventId || undefined,
+            idempotencyKey: row.idempotencyKey || undefined,
+            payloadHash: row.payloadHash,
+            status: row.status as WebhookRecord["status"],
+            retryCount: row.retryCount,
+            errorMessage: row.errorMessage || undefined,
+            processedAt: row.processedAt?.toISOString(),
+            createdAt: row.createdAt.toISOString(),
+          };
+        }
+      } catch (err) {
+        console.warn("DB getWebhookByEventId failed:", err);
+      }
+    }
+
+    const found = inMemoryWebhooks.find((w) => w.externalEventId === eventId);
+    return found ? { ...found } : null;
+  }
+
+  /**
+   * Clears in-memory webhooks for testing purposes.
+   */
+  clearInMemoryWebhooks(): void {
+    inMemoryWebhooks.length = 0;
+  }
+
+  /**
    * Retrieves hospital settings from database or default fallback.
    */
   async getHospitalSettings(): Promise<HospitalSettings> {
