@@ -61,6 +61,13 @@ export interface IDayaHmsAdapter {
   bookAppointment(input: BookAppointmentInput): Promise<BookAppointmentResult>;
   rescheduleAppointment(input: RescheduleAppointmentInput): Promise<BookAppointmentResult>;
   cancelAppointment(bookingRef: string, idempotencyKey: string): Promise<CancelAppointmentResult>;
+  verifyBooking(bookingRef: string): Promise<{
+    verified: boolean;
+    bookingRef: string;
+    doctorName?: string;
+    slot?: string;
+    status: "CONFIRMED" | "NOT_FOUND" | "CANCELLED";
+  }>;
 }
 
 export interface ISarvamVoiceAdapter {

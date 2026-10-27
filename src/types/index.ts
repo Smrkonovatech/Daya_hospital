@@ -36,7 +36,20 @@ export type ActionStatus =
   | "REQUIRES_STAFF_FOLLOW_UP"
   | "CANCELLED";
 
+export type ActionCategory =
+  | "APPOINTMENT_BOOKING"
+  | "APPOINTMENT_RESCHEDULING"
+  | "APPOINTMENT_CANCELLATION"
+  | "APPOINTMENT_AVAILABILITY"
+  | "HOSPITAL_INFO_PROVIDED"
+  | "CONSULTATION_FEE_ENQUIRY"
+  | "CALLBACK_REQUESTED"
+  | "CALL_TRANSFERRED_TO_STAFF"
+  | "UNRESOLVED_ENQUIRY"
+  | "OTHER_ACTION";
+
 export type ActionType =
+  | ActionCategory
   | "CHECK_DOCTOR_SLOT"
   | "BOOK_APPOINTMENT"
   | "RESCHEDULE_APPOINTMENT"
@@ -101,26 +114,83 @@ export interface CallRecord {
   reviewHistory?: CallReviewEntry[];
 }
 
+export interface ActionReviewEntry {
+  id: string;
+  reviewerId: string;
+  reviewerName: string;
+  action: "REVIEWED" | "NOTE_ADDED" | "FOLLOW_UP_ASSIGNED" | "RESOLVED" | "VERIFICATION_CHECKED";
+  notes?: string;
+  timestamp: string;
+}
+
 export interface AiActionDetail {
   id: string;
   callId: string;
   callerNumber: string;
   callerName?: string;
   actionType: ActionType;
+  category?: ActionCategory;
   status: ActionStatus;
   idempotencyKey: string;
   requestedAt: string;
   completedAt?: string;
   hmsBookingRef?: string;
+  hmsTransactionId?: string;
   doctorName?: string;
   department?: string;
   appointmentSlot?: string;
   patientUhid?: string;
   patientName?: string;
+  callerRequestSummary?: string;
+  aiAttemptSummary?: string;
+  sanitizedPayload?: Record<string, unknown>;
+  hmsResultSummary?: string;
+  timingDetails?: {
+    initiatedAt: string;
+    completedAt?: string;
+    latencyMs?: number;
+    processingStatus: "COMPLETED" | "TIMEOUT" | "RETRYING" | "PENDING" | "ERROR";
+  };
+  retryAttempts?: number;
+  eventId?: string;
+  errorDetails?: {
+    code: string;
+    safeMessage: string;
+    followUpRequired: boolean;
+  };
   failureReason?: string;
   staffNotes?: string;
+  assignedStaff?: string;
+  isReviewed?: boolean;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewHistory?: ActionReviewEntry[];
   payload?: Record<string, unknown>;
   responsePayload?: Record<string, unknown>;
+}
+
+export interface ActionWebhookEvent {
+  eventId: string;
+  idempotencyKey: string;
+  callId: string;
+  callerNumber: string;
+  callerName?: string;
+  actionType: string;
+  timestamp: string;
+  callerRequest?: string;
+  aiAttempt?: string;
+  doctorName?: string;
+  department?: string;
+  payload?: Record<string, unknown>;
+  hmsResult?: {
+    status: "SUCCESS" | "FAILED" | "PENDING";
+    transactionId?: string;
+    bookingRef?: string;
+    tokenNumber?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  };
+  retryCount?: number;
 }
 
 export type KnowledgeCategory =

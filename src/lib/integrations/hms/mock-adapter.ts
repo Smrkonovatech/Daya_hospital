@@ -121,4 +121,29 @@ export class MockDayaHmsAdapter implements IDayaHmsAdapter {
       releasedSlot: "Released back into Daya HMS OPD inventory pool",
     };
   }
+
+  async verifyBooking(bookingRef: string): Promise<{
+    verified: boolean;
+    bookingRef: string;
+    doctorName?: string;
+    slot?: string;
+    status: "CONFIRMED" | "NOT_FOUND" | "CANCELLED";
+  }> {
+    // Known valid booking references in Daya Hospital HMS
+    const validRefs = ["DAYA-HMS-OPD-78219", "DAYA-HMS-OPD-78220", "DAYA-HMS-OPD-77189", "DAYA-HMS-OPD-71004"];
+    if (validRefs.includes(bookingRef) || bookingRef.startsWith("DAYA-HMS-OPD-")) {
+      return {
+        verified: true,
+        bookingRef,
+        doctorName: "Dr. Suresh Kumar",
+        slot: "OPD Slot Token #14",
+        status: "CONFIRMED",
+      };
+    }
+    return {
+      verified: false,
+      bookingRef,
+      status: "NOT_FOUND",
+    };
+  }
 }
