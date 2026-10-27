@@ -9,9 +9,23 @@ export async function GET(
 
   // 1. Server-side permission & security check
   // In healthcare calling, recordings are sensitive PHI and cannot be accessed publicly.
+  const token = request.cookies.get("daya_auth_session")?.value;
+  const session = token ? await (await import("@/lib/auth/session")).verifySessionToken(token) : null;
+
+  if (session && session.role !== "HOSPITAL_ADMIN" && !session.canAccessRecordings) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Forbidden: Access to call audio recordings requires explicit Administrator authorisation.",
+        code: "FORBIDDEN_RECORDING_ACCESS",
+      },
+      { status: 403 }
+    );
+  }
+
   const authHeader = request.headers.get("authorization");
-  // Permitted in local dev session, or verified bearer token
   const isAuthorized =
+    Boolean(session) ||
     process.env.NODE_ENV === "development" ||
     (authHeader && authHeader.startsWith("Bearer "));
 

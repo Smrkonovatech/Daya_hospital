@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MOCK_USER } from "@/lib/mock-data";
+import { useAuth } from "@/components/auth/auth-provider";
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -205,44 +206,7 @@ export function Sidebar({
 
       {/* User Profile & Role Section */}
       <div className="border-t border-slate-100 p-3">
-        <div
-          className={cn(
-            "flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-slate-50",
-            collapsed && !mobileOpen && "justify-center p-1"
-          )}
-        >
-          <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0C5DB8] text-xs font-semibold text-white ring-2 ring-[#0C5DB8]/20">
-            {MOCK_USER.name
-              .split(" ")
-              .map((n) => n[0])
-              .join("")
-              .slice(0, 2)}
-          </div>
-
-          {(!collapsed || mobileOpen) && (
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1">
-                <p className="truncate text-xs font-semibold text-slate-900">
-                  {MOCK_USER.name}
-                </p>
-                <ShieldCheck className="h-3.5 w-3.5 text-[#0C5DB8] shrink-0" />
-              </div>
-              <p className="truncate text-[11px] text-slate-500">
-                Hospital Administrator
-              </p>
-            </div>
-          )}
-
-          {(!collapsed || mobileOpen) && (
-            <button
-              title="Logout"
-              onClick={() => alert("Session logged out safely.")}
-              className="rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors cursor-pointer"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <SidebarUserProfile collapsed={collapsed} mobileOpen={mobileOpen} />
       </div>
     </div>
   );
@@ -275,3 +239,60 @@ export function Sidebar({
     </>
   );
 }
+
+function SidebarUserProfile({
+  collapsed,
+  mobileOpen,
+}: {
+  collapsed?: boolean;
+  mobileOpen?: boolean;
+}) {
+  const { user, logout } = useAuth();
+  const displayName = user?.name || MOCK_USER.name;
+  const roleLabel =
+    user?.role === "HOSPITAL_ADMIN"
+      ? "Hospital Administrator"
+      : "Hospital Staff Reviewer";
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-slate-50",
+        collapsed && !mobileOpen && "justify-center p-1"
+      )}
+    >
+      <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0C5DB8] text-xs font-semibold text-white ring-2 ring-[#0C5DB8]/20">
+        {displayName
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+          .slice(0, 2)}
+      </div>
+
+      {(!collapsed || mobileOpen) && (
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1">
+            <p className="truncate text-xs font-semibold text-slate-900">
+              {displayName}
+            </p>
+            {user?.role === "HOSPITAL_ADMIN" && (
+              <ShieldCheck className="h-3.5 w-3.5 text-[#0C5DB8] shrink-0" />
+            )}
+          </div>
+          <p className="truncate text-[11px] text-slate-500">{roleLabel}</p>
+        </div>
+      )}
+
+      {(!collapsed || mobileOpen) && (
+        <button
+          title="Sign Out"
+          onClick={() => logout()}
+          className="rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors cursor-pointer"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+

@@ -37,9 +37,11 @@ import { KnowledgePublishModal } from "@/components/knowledge/knowledge-publish-
 import { KnowledgeAuditModal } from "@/components/knowledge/knowledge-audit-modal";
 import { SarvamSyncStatusCard } from "@/components/knowledge/sarvam-sync-status-card";
 import { SarvamSyncResult } from "@/lib/integrations/sarvam/knowledge-sync";
+import { useAuth } from "@/components/auth/auth-provider";
 
 export default function KnowledgeBasePage() {
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const [articles, setArticles] = React.useState<KnowledgeArticle[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -688,15 +690,24 @@ export default function KnowledgeBasePage() {
 
                       {/* Explicit Publish Action Button */}
                       {(article.status === "DRAFT" || article.hasUnpublishedChanges) && (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleOpenPublish(article)}
-                          className="h-7 text-xs bg-[#0C5DB8] hover:bg-[#0A4D98] text-white gap-1 px-2.5"
-                        >
-                          <Send className="h-3 w-3" />
-                          <span>Publish</span>
-                        </Button>
+                        isAdmin ? (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleOpenPublish(article)}
+                            className="h-7 text-xs bg-[#0C5DB8] hover:bg-[#0A4D98] text-white gap-1 px-2.5"
+                          >
+                            <Send className="h-3 w-3" />
+                            <span>Publish</span>
+                          </Button>
+                        ) : (
+                          <span
+                            className="rounded bg-slate-100 border border-slate-200 px-2 py-1 text-[10px] text-slate-500 font-medium shrink-0 cursor-not-allowed"
+                            title="Only Hospital Administrators can publish approved knowledge live"
+                          >
+                            Publish (Admin Only)
+                          </span>
+                        )
                       )}
                     </div>
                   </div>

@@ -1,4 +1,4 @@
-export type UserRole = "HOSPITAL_ADMIN" | "CALL_REVIEWER";
+export type UserRole = "HOSPITAL_ADMIN" | "HOSPITAL_STAFF" | "CALL_REVIEWER";
 
 export interface UserProfile {
   id: string;
@@ -6,7 +6,33 @@ export interface UserProfile {
   email: string;
   role: UserRole;
   department: string;
+  employeeId?: string;
+  phone?: string;
+  canAccessRecordings: boolean;
+  status: "ACTIVE" | "INACTIVE";
   avatarUrl?: string;
+  lastLoginAt?: string;
+  createdAt?: string;
+}
+
+export interface AuthSession {
+  userId: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  department: string;
+  canAccessRecordings: boolean;
+  expiresAt: number;
+}
+
+export interface SystemIncident {
+  id: string;
+  timestamp: string;
+  service: "sarvam_ai" | "daya_hms" | "telephony_ivr";
+  severity: "INFO" | "WARNING" | "RESOLVED";
+  title: string;
+  description: string;
+  resolvedAt?: string;
 }
 
 export type CallStatus = "ANSWERED" | "BUSY" | "MISSED" | "TRANSFERRED" | "FAILED";

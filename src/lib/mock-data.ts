@@ -12,6 +12,10 @@ export const MOCK_USER: UserProfile = {
   email: "anjali.menon@dayahospital.com",
   role: "HOSPITAL_ADMIN",
   department: "Healthcare Informatics & Patient Care",
+  employeeId: "DAYA-ADM-001",
+  phone: "+91 94471 23456",
+  canAccessRecordings: true,
+  status: "ACTIVE",
   avatarUrl: "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=150&auto=format&fit=crop&q=80",
 };
 

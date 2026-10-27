@@ -36,6 +36,25 @@ beforeEach(() => {
       });
     }
 
+    if (url.includes("/api/auth/me")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          authenticated: true,
+          user: {
+            id: "usr_admin",
+            name: "Dr. Anjali Menon",
+            email: "admin@dayahospital.com",
+            role: "HOSPITAL_ADMIN",
+            department: "Informatics & Medical Admin",
+            canAccessRecordings: true,
+            status: "ACTIVE",
+          },
+        }),
+      });
+    }
+
     if (url.includes("/api/knowledge")) {
       return Promise.resolve({
         ok: true,
@@ -51,13 +70,19 @@ beforeEach(() => {
   });
 });
 
+import { AuthProvider } from "@/components/auth/auth-provider";
+
+const renderWithProviders = (ui: React.ReactElement) => {
+  return render(
+    <ToastProvider>
+      <AuthProvider>{ui}</AuthProvider>
+    </ToastProvider>
+  );
+};
+
 describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   it("renders page title and healthcare safeguards notice with casualty hotline", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -77,11 +102,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("renders Sarvam voice sync card displaying Demo Mode (not false success)", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -98,11 +119,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("loads and displays knowledge articles covering hospital categories", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -124,11 +141,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("filters articles when clicking category buttons", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -151,11 +164,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("searches bilingual titles and content via search input", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -178,11 +187,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("opens the Version Audit Trail modal when clicking Audit button", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     await waitFor(() => {
       expect(
@@ -200,11 +205,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
   });
 
   it("handles clicking Sync with Voice Agent without showing false success", async () => {
-    render(
-      <ToastProvider>
-        <KnowledgeBasePage />
-      </ToastProvider>
-    );
+    renderWithProviders(<KnowledgeBasePage />);
 
     const syncBtn = screen.getByRole("button", { name: /Sync with Voice Agent/i });
     fireEvent.click(syncBtn);
