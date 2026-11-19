@@ -1,496 +1,191 @@
 "use client";
 
 import * as React from "react";
-import {
-  PhoneCall,
-  PhoneForwarded,
-  CheckCircle2,
-  CalendarCheck,
-  CalendarClock,
-  CalendarX,
-  AlertTriangle,
-  Sparkles,
-  RefreshCw,
-  Clock,
-  Layers,
-  Info,
-} from "lucide-react";
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { PageHeader } from "@/components/ui/page-header";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorState } from "@/components/ui/error-state";
 import { useToast } from "@/components/ui/toast";
-import { KpiMetricCard } from "@/components/dashboard/kpi-metric-card";
-import { CallVolumeTrendChart } from "@/components/dashboard/call-volume-trend-chart";
-import { OutcomeDistributionChart } from "@/components/dashboard/outcome-distribution-chart";
-import { ActionDistributionChart } from "@/components/dashboard/action-distribution-chart";
-import { HourlyDistributionChart } from "@/components/dashboard/hourly-distribution-chart";
-import { RecentCallsTable } from "@/components/dashboard/recent-calls-table";
-import { FollowUpQueueWidget } from "@/components/dashboard/follow-up-queue-widget";
-import { IntegrationStatusPanel } from "@/components/dashboard/integration-status-panel";
-import { CallDetailModal } from "@/components/calls/call-detail-modal";
+import { CanvasGroup, SmrkomedShell } from "@/components/smrkomed/smrkomed-shell";
+import {
+  ActionBar,
+  ActionDistributionCard,
+  AlertItem,
+  AlertList,
+  AssistantIllustration,
+  BackgroundGlows,
+  CallVolumeCard,
+  CreditUsageCard,
+  HeroRing,
+  HeroTitle,
+  KpiTile,
+  MiniStats,
+  StaffAttention,
+  StaffTask,
+  StatusPills,
+} from "@/components/smrkomed/dashboard-sections";
 import { overviewService, OverviewDashboardData } from "@/lib/services/overview-service";
-import { CallRecord } from "@/types";
+
+/** Figma values used until the service responds (and for widgets with no backing data yet). */
+const DESIGN_DEFAULTS = {
+  callsOffered: 1248,
+  callsAnswered: 1184,
+  callsCompleted: 1042,
+  appointmentsBooked: 312,
+  transferredToStaff: 142,
+  requiresFollowUp: 38,
+};
+
+const ACTION_LABELS: Record<string, [string, string]> = {
+  BOOK_APPOINTMENT: ["Book", "Appointment"],
+  CHECK_DOCTOR_SLOT: ["Doctor Slot", "Search"],
+  RESCHEDULE_APPOINTMENT: ["Reschedule", "Appointment"],
+  TRANSFER_CALL_TO_STAFF: ["Staff", "Transfer"],
+  CANCEL_APPOINTMENT: ["Cancel", "Appointment"],
+};
+const ACTION_COLORS = ["#866be3", "#c178f5", "#209bb2", "#ffa75d", "#0388bd"];
+const DESIGN_ACTION_BARS: ActionBar[] = [
+  { label: ["Book", "Appointment"], value: 300, color: ACTION_COLORS[0] },
+  { label: ["Doctor Slot", "Search"], value: 450, color: ACTION_COLORS[1] },
+  { label: ["Reschedule", "Appointment"], value: 100, color: ACTION_COLORS[2] },
+  { label: ["Staff", "Transfer"], value: 150, color: ACTION_COLORS[3] },
+  { label: ["Cancel", "Appointment"], value: 50, color: ACTION_COLORS[4] },
+];
+
+const ALERTS: AlertItem[] = [
+  { label: "Clinical Escalations", count: 2, tone: "red", href: "/calls" },
+  { label: "Reports Awaiting Review", count: 2, tone: "red", href: "/actions" },
+  { label: "Care Loop Exceptions", count: 3, tone: "amber", href: "/actions" },
+  { label: "Patient Questions", count: 2, tone: "green", href: "/calls" },
+];
+
+const STAFF_TASKS: StaffTask[] = [
+  { time: "09:58 am", patient: "Biju Parakkal", task: "Appointment Booking", assignee: "Sister Mary", avatar: 1, href: "/calls" },
+  { time: "09:58 am", patient: "Biju Parakkal", task: "Doctor Availability", assignee: "OPD Lead", avatar: 2, href: "/calls" },
+  { time: "09:58 am", patient: "Ramesh kumar", task: "Insurance TPA", assignee: "TPA Desk", avatar: 3, href: "/calls", shift: 10 },
+  { time: "09:58 am", patient: "Sujatha", task: "Follow-Up", assignee: "Care Team", avatar: 4, href: "/calls" },
+];
+
+const AI_CALLS_HOURLY = [26, 37, 22, 29, 37, 16, 22, 43, 37, 50, 61];
 
 export default function OverviewPage() {
   const { showToast } = useToast();
-  const [selectedRange, setSelectedRange] = React.useState("Today");
+  const [range, setRange] = React.useState("Today");
   const [data, setData] = React.useState<OverviewDashboardData | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [isRefreshing, setIsRefreshing] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
 
-  const [selectedCall, setSelectedCall] = React.useState<CallRecord | null>(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = React.useState(false);
-  const [callsList, setCallsList] = React.useState<CallRecord[]>([]);
-
-  // Range and Refresh handlers
-  const handleRangeChange = (newRange: string) => {
-    setIsLoading(true);
-    setSelectedRange(newRange);
-  };
-
-  const handleRefresh = async () => {
-    try {
-      setIsRefreshing(true);
-      const currentFormattedTime =
-        new Date().toLocaleTimeString("en-IN", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: "Asia/Kolkata",
-        }) + " IST";
-
-      const result = await overviewService.getOverviewData(selectedRange, {
-        timestamp: currentFormattedTime,
-      });
-
-      setData(result);
-      setCallsList(result.recentCalls);
-      showToast({
-        type: "success",
-        title: "Dashboard Refreshed",
-        message: `Refreshed metrics for ${selectedRange} at ${result.freshnessTimestamp}.`,
-      });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to refresh overview data.";
-      setError(message);
-      showToast({
-        type: "error",
-        title: "Refresh Failed",
-        message,
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Initial fetch and range change
   React.useEffect(() => {
-    let isMounted = true;
-
+    let alive = true;
     overviewService
-      .getOverviewData(selectedRange)
+      .getOverviewData(range)
       .then((result) => {
-        if (isMounted) {
-          setData(result);
-          setCallsList(result.recentCalls);
-          setIsLoading(false);
-          setError(null);
-        }
+        if (alive) setData(result);
       })
       .catch((err: unknown) => {
-        if (isMounted) {
-          setError(
-            err instanceof Error ? err.message : "Failed to load overview data."
-          );
-          setIsLoading(false);
-        }
+        if (!alive) return;
+        showToast({
+          type: "error",
+          title: "Failed to load dashboard",
+          message: err instanceof Error ? err.message : "Could not load overview data.",
+        });
       });
-
     return () => {
-      isMounted = false;
+      alive = false;
     };
-  }, [selectedRange]);
+  }, [range, showToast]);
 
-  const handleOpenCall = (call: CallRecord) => {
-    setSelectedCall(call);
-    setIsDetailModalOpen(true);
-  };
+  const m = data?.metrics ?? DESIGN_DEFAULTS;
+  const dropped = Math.max(0, m.callsOffered - m.callsAnswered);
 
-  const handleCloseCall = () => {
-    setIsDetailModalOpen(false);
-  };
-
-  const handleResolveFollowUp = (callId: string) => {
-    setCallsList((prev) =>
-      prev.map((c) =>
-        c.id === callId
-          ? { ...c, requiresFollowUp: false, followUpStatus: "RESOLVED" }
-          : c
-      )
-    );
-    showToast({
-      type: "info",
-      title: "Follow-up Resolved",
-      message: `Call ${callId} marked as handled by staff.`,
-    });
-  };
-
-  const handleUpdateFollowUp = (
-    callId: string,
-    notes: string,
-    resolved: boolean
-  ) => {
-    setCallsList((prev) =>
-      prev.map((c) =>
-        c.id === callId
-          ? {
-              ...c,
-              followUpNotes: notes,
-              requiresFollowUp: !resolved,
-              followUpStatus: resolved ? "RESOLVED" : "IN_PROGRESS",
-            }
-          : c
-      )
-    );
-    if (selectedCall?.id === callId) {
-      setSelectedCall((prev) =>
-        prev
-          ? {
-              ...prev,
-              followUpNotes: notes,
-              requiresFollowUp: !resolved,
-              followUpStatus: resolved ? "RESOLVED" : "IN_PROGRESS",
-            }
-          : null
-      );
-    }
-  };
+  const bars: ActionBar[] = data?.actionDistribution?.length
+    ? data.actionDistribution.slice(0, 5).map((a, i) => ({
+        label: ACTION_LABELS[a.actionType] ?? [a.actionLabel, ""],
+        value: a.count,
+        color: ACTION_COLORS[i % ACTION_COLORS.length],
+      }))
+    : DESIGN_ACTION_BARS;
 
   return (
-    <DashboardLayout
-      selectedDateRange={selectedRange}
-      onDateRangeChange={handleRangeChange}
-    >
-      <div className="space-y-6">
-        {/* 1. Page Header */}
-        <PageHeader
-          title="Daya Hospital AI Calling"
-          description="Monitor AI calls, patient enquiries and appointment actions."
-          badge={
-            <div className="flex items-center gap-2">
-              <Badge variant="teal" size="sm" className="gap-1.5 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                24/7 Voice Operations
-              </Badge>
-              {data?.isDemoData && (
-                <div
-                  className="flex items-center gap-1 rounded bg-amber-100/80 px-2 py-0.5 text-[11px] font-bold text-amber-900 border border-amber-300"
-                  title="Demo data mode: Metrics reflect simulated hospital call records and sandbox adapters."
-                >
-                  <Layers className="h-3 w-3 text-amber-700" />
-                  <span>Demo data</span>
-                </div>
-              )}
-            </div>
-          }
-          breadcrumbs={[{ label: "Overview" }]}
-          actions={
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Date Freshness Timestamp */}
-              <div
-                className="hidden lg:flex items-center gap-1.5 rounded-md bg-slate-100/80 px-2.5 py-1 text-xs text-slate-600 border border-slate-200"
-                title="Data freshness timestamp"
-              >
-                <Clock className="h-3.5 w-3.5 text-slate-400" />
-                <span>
-                  Freshness:{" "}
-                  <strong className="text-slate-800">
-                    {data?.freshnessTimestamp || "Loading..."}
-                  </strong>
-                </span>
-              </div>
+    <SmrkomedShell>
+      <BackgroundGlows />
 
-              {/* Date-Range Selector */}
-              <div className="flex items-center rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs">
-                {["Today", "Yesterday", "Last 7 Days", "Last 30 Days"].map(
-                  (range) => (
-                    <button
-                      key={range}
-                      onClick={() => handleRangeChange(range)}
-                      className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                        selectedRange === range
-                          ? "bg-white text-slate-900 shadow-2xs font-semibold"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      {range}
-                    </button>
-                  )
-                )}
-              </div>
-
-              {/* Refresh Button */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={isRefreshing || isLoading}
-                className="h-8 gap-1.5 text-xs text-slate-700 hover:text-slate-900 hover:bg-slate-50"
-                title="Refresh dashboard data"
-              >
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-[#0C5DB8]" : "text-slate-500"}`}
-                />
-                <span className="hidden sm:inline">
-                  {isRefreshing ? "Refreshing..." : "Refresh"}
-                </span>
-              </Button>
-            </div>
-          }
-        />
-
-        {/* Demo Data Banner Alert */}
-        {data?.isDemoData && (
-          <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900">
-            <div className="flex items-center gap-2">
-              <Info className="h-4 w-4 text-amber-700 shrink-0" />
-              <span>
-                <strong>Demo data indicator:</strong> This dashboard is currently operating with simulated Daya Hospital call records and sandbox adapters. No live patient calls or HMS production endpoints are altered.
-              </span>
-            </div>
-            <span className="hidden sm:inline-block font-mono text-[10px] text-amber-700 font-semibold uppercase">
-              Sandbox Mode
-            </span>
-          </div>
-        )}
-
-        {/* Error Handling */}
-        {error && (
-          <ErrorState
-            title="Failed to Load Overview Data"
-            message={error}
-            onRetry={() => handleRangeChange(selectedRange)}
-          />
-        )}
-
-        {/* Loading Skeleton */}
-        {isLoading && !data && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {Array.from({ length: 8 }).map((_, idx) => (
-                <div key={idx} className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-8 w-20" />
-                  <Skeleton className="h-3 w-36" />
-                </div>
-              ))}
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-6">
-              <Skeleton className="h-28 w-full" />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Skeleton className="h-72 w-full rounded-xl" />
-              <Skeleton className="h-72 w-full rounded-xl" />
-            </div>
-          </div>
-        )}
-
-        {/* Data Loaded */}
-        {data && (
-          <>
-            {/* 2. Metric Cards */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  AI Calling Operations & Appointment Actions ({selectedRange})
-                </h2>
-                <span className="text-xs text-slate-400">
-                  Click any card to inspect filtered calls or actions
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* 1. Calls Offered to AI */}
-                <KpiMetricCard
-                  title="Calls Offered to AI"
-                  value={data.metrics.callsOffered}
-                  subtitle="From IVR rollover & direct lines"
-                  icon={PhoneCall}
-                  variant="blue"
-                  tooltip="Total inbound calls routed from hospital lines/IVR to the AI assistant"
-                  href="/calls"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 2. Calls Answered by AI */}
-                <KpiMetricCard
-                  title="Calls Answered by AI"
-                  value={data.metrics.callsAnswered}
-                  subtitle="Picked up within 2 rings"
-                  icon={Sparkles}
-                  variant="teal"
-                  badge="Malayalam"
-                  tooltip="Inbound calls successfully answered by Sarvam AI voice assistant in Malayalam"
-                  href="/calls?status=ANSWERED"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 3. Calls Completed */}
-                <KpiMetricCard
-                  title="Calls Completed"
-                  value={data.metrics.callsCompleted}
-                  subtitle="Resolved end-to-end by AI"
-                  icon={CheckCircle2}
-                  variant="teal"
-                  tooltip="Patient calls completely resolved by AI without requiring human staff escalation"
-                  href="/calls?status=ANSWERED&outcome=COMPLETED"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 4. Appointments Booked */}
-                <KpiMetricCard
-                  title="Appointments Booked"
-                  value={data.metrics.appointmentsBooked}
-                  subtitle="Confirmed directly into HMS"
-                  icon={CalendarCheck}
-                  variant="blue"
-                  tooltip="Confirmed patient outpatient consultations booked directly into Daya HMS"
-                  href="/actions?type=BOOK_APPOINTMENT"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 5. Appointments Rescheduled */}
-                <KpiMetricCard
-                  title="Appointments Rescheduled"
-                  value={data.metrics.appointmentsRescheduled}
-                  subtitle="Slots safely updated in HMS"
-                  icon={CalendarClock}
-                  variant="teal"
-                  tooltip="Existing OPD appointments shifted to new available doctor slots"
-                  href="/actions?type=RESCHEDULE_APPOINTMENT"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 6. Appointments Cancelled */}
-                <KpiMetricCard
-                  title="Appointments Cancelled"
-                  value={data.metrics.appointmentsCancelled}
-                  subtitle="Released back to HMS inventory"
-                  icon={CalendarX}
-                  variant="default"
-                  tooltip="Appointments cancelled and released back to Daya HMS inventory"
-                  href="/actions?type=CANCEL_APPOINTMENT"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 7. Transferred to Staff */}
-                <KpiMetricCard
-                  title="Transferred to Staff"
-                  value={data.metrics.transferredToStaff}
-                  subtitle="Escalated to human agents"
-                  icon={PhoneForwarded}
-                  variant="amber"
-                  tooltip="Calls escalated to Daya hospital front-desk / duty nurse for complex clinical needs"
-                  href="/calls?status=TRANSFERRED"
-                  isDemoData={data.isDemoData}
-                />
-
-                {/* 8. Requires Follow-Up */}
-                <KpiMetricCard
-                  title="Requires Follow-Up"
-                  value={data.metrics.requiresFollowUp}
-                  subtitle="Pending staff callback"
-                  icon={AlertTriangle}
-                  variant="rose"
-                  badge="Staff Action"
-                  tooltip="Incomplete queries or failed token bookings requiring manual staff callback"
-                  href="/calls?followUp=true"
-                  isDemoData={data.isDemoData}
-                />
-              </div>
-            </div>
-
-            {/* 5. Integration Status Panel */}
-            <IntegrationStatusPanel
-              services={data.integrationStatus.services}
-              lastSuccessfulSync={data.integrationStatus.lastSuccessfulSync}
-              activeIncidents={data.integrationStatus.activeIncidents}
-              isMockSandbox={data.integrationStatus.isMockSandbox}
-            />
-
-            {/* 3. Charts: 4 Recharts in 2x2 Grid */}
-            <div className="space-y-3">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Call Trends & Performance Analytics ({selectedRange})
-              </h2>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Chart 1: AI Call Volume Over Time */}
-                <CallVolumeTrendChart
-                  data={data.volumeOverTime}
-                  title="AI Call Volume Over Time"
-                  description="Inbound calls offered vs completed by AI over the selected timeframe"
-                />
-
-                {/* Chart 2: Call Outcome Distribution */}
-                <OutcomeDistributionChart
-                  data={data.outcomeDistribution}
-                  title="Call Outcome Distribution"
-                  description="Proportion of calls completed, transferred to staff, or needing follow-up"
-                />
-
-                {/* Chart 3: AI Action Distribution */}
-                <ActionDistributionChart
-                  data={data.actionDistribution}
-                  title="AI Action Distribution"
-                  description="Breakdown of automated clinical bookings and enquiry actions taken"
-                />
-
-                {/* Chart 4: Hourly Call Distribution */}
-                <HourlyDistributionChart
-                  data={data.hourlyDistribution}
-                  title="Hourly Call Distribution (24 Hours)"
-                  description="Day & night hospital call patterns showing peak OPD rush hours"
-                />
-              </div>
-            </div>
-
-            {/* 4. Recent Calls Table & Follow-up Queue */}
-            <div className="space-y-6">
-              {/* Recent Calls Table */}
-              <RecentCallsTable
-                calls={callsList}
-                onSelectCall={handleOpenCall}
-                title="Recent AI Inbound Calls"
-                description="Audit time, masked caller, intent, duration, AI action, and final outcome with full history link"
-              />
-
-              {/* Staff Follow-Up Queue Widget */}
-              <FollowUpQueueWidget
-                calls={callsList}
-                onSelectCall={handleOpenCall}
-                onResolveFollowUp={handleResolveFollowUp}
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Call Detail Modal */}
-      <CallDetailModal
-        call={selectedCall}
-        isOpen={isDetailModalOpen}
-        onClose={handleCloseCall}
-        onUpdateFollowUp={handleUpdateFollowUp}
+      {/* Column A: KPI tiles + call volume (anchored left) */}
+      <CanvasGroup spread={0}>
+      <KpiTile
+        label="Appointments Booked"
+        value={m.appointmentsBooked}
+        delta="6% Vs Yesterday"
+        top={34}
+        deltaTop={71}
+        href="/actions"
+        spark={{ variant: "up", x: 119, y: 17, h: 46, start: [117, 60], end: [193, 15] }}
       />
-    </DashboardLayout>
+      <KpiTile
+        label="Transferred to Staff"
+        value={m.transferredToStaff}
+        delta="6% Vs Yesterday"
+        top={136}
+        deltaTop={71}
+        href="/calls"
+        spark={{ variant: "down", x: 119, y: 31, h: 24, start: [117, 28], end: [195, 53] }}
+      />
+      <KpiTile
+        label={
+          <>
+            Required
+            <br />
+            Follow up
+          </>
+        }
+        value={m.requiresFollowUp}
+        delta="6% Vs Yesterday"
+        top={240}
+        deltaTop={72}
+        href="/calls"
+        spark={{ variant: "up", x: 118, y: 20, h: 46, start: [116, 63], end: [192, 18] }}
+      />
+      <KpiTile
+        label="Appointments Booked"
+        value={m.appointmentsBooked}
+        delta="6% Vs Yesterday"
+        top={342}
+        deltaTop={72}
+        href="/actions"
+        spark={{ variant: "up", x: 120, y: 18, h: 46, start: [118, 61], end: [194, 16] }}
+      />
+      <CallVolumeCard offered={m.callsOffered} completed={m.callsCompleted} />
+      </CanvasGroup>
+
+      {/* Column B: hero + action distribution */}
+      <CanvasGroup spread={1 / 3}>
+      <HeroTitle />
+      <HeroRing
+        total={m.callsOffered}
+        completed={m.callsCompleted}
+        transferred={m.transferredToStaff}
+        dropped={dropped}
+        completedPct={34}
+        transferredPct={5}
+        droppedPct={6}
+        totalDeltaPct={12}
+      />
+      <AssistantIllustration />
+      <ActionDistributionCard bars={bars} />
+      </CanvasGroup>
+
+      {/* Column C: status pills, mini stats, credit usage */}
+      <CanvasGroup spread={2 / 3}>
+      <StatusPills range={range} onRangeChange={setRange} />
+      <MiniStats appointmentsPct={12} growthPct={40} deltaVsYesterday={248} hourly={AI_CALLS_HOURLY} />
+      <CreditUsageCard
+        used={3750}
+        total={5000}
+        onAddCredits={() =>
+          showToast({ type: "info", title: "Add Credits", message: "Credit top-up will be available once billing is connected." })
+        }
+      />
+      </CanvasGroup>
+
+      {/* Column D: alerts + staff attention (anchored right) */}
+      <CanvasGroup spread={1}>
+        <AlertList items={ALERTS} />
+        <StaffAttention tasks={STAFF_TASKS} />
+      </CanvasGroup>
+    </SmrkomedShell>
   );
 }

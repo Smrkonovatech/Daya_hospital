@@ -84,50 +84,38 @@ vi.mock("@/lib/services/overview-service", async (importOriginal) => {
   };
 });
 
-describe("OverviewPage (Phase 2)", () => {
-  it("renders page header, demo indicator, freshness, and all 8 metric cards", async () => {
+describe("OverviewPage (SMRKOMED design)", () => {
+  it("renders the SMRKOMED dashboard sections with service data", async () => {
     render(
       <ToastProvider>
         <OverviewPage />
       </ToastProvider>
     );
 
-    // 1. Header & Subtitle
-    expect(screen.getByText("Daya Hospital AI Calling")).toBeInTheDocument();
-    expect(
-      screen.getByText("Monitor AI calls, patient enquiries and appointment actions.")
-    ).toBeInTheDocument();
+    // Hero + chrome
+    expect(screen.getByText("Daya Hospital")).toBeInTheDocument();
+    expect(screen.getByText("AI Calling operations")).toBeInTheDocument();
+    expect(screen.getByText("Total Calls Received")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(screen.getByText("Patient Care")).toBeInTheDocument();
 
-    // Wait for overviewService to resolve and populate data
     await waitFor(() => {
-      // 2. Demo data indicator
-      expect(screen.getAllByText("Demo data").length).toBeGreaterThan(0);
+      // Ring values from overviewService
+      expect(screen.getAllByText("1248").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("1042").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("142").length).toBeGreaterThan(0);
+      expect(screen.getByText("64")).toBeInTheDocument();
 
-      // 3. All 8 Metric Cards
-      expect(screen.getByText("Calls Offered to AI")).toBeInTheDocument();
-      expect(screen.getByText("Calls Answered by AI")).toBeInTheDocument();
-      expect(screen.getByText("Calls Completed")).toBeInTheDocument();
-      expect(screen.getByText("Appointments Booked")).toBeInTheDocument();
-      expect(screen.getByText("Appointments Rescheduled")).toBeInTheDocument();
-      expect(screen.getByText("Appointments Cancelled")).toBeInTheDocument();
+      // KPI tiles
+      expect(screen.getAllByText("Appointments Booked").length).toBe(2);
       expect(screen.getByText("Transferred to Staff")).toBeInTheDocument();
-      expect(screen.getByText("Requires Follow-Up")).toBeInTheDocument();
 
-      // 4. Integration status panel
-      expect(screen.getByText("Integration Gateways Status")).toBeInTheDocument();
-      expect(screen.getByText("Sarvam Voice Service")).toBeInTheDocument();
-      expect(screen.getByText("IVR / Telephony Trunk")).toBeInTheDocument();
-      expect(screen.getByText("Daya HMS API")).toBeInTheDocument();
-
-      // 5. Four Chart Titles
-      expect(screen.getByText("AI Call Volume Over Time")).toBeInTheDocument();
-      expect(screen.getByText("Call Outcome Distribution")).toBeInTheDocument();
+      // Cards
+      expect(screen.getByText("Call Volume Trend")).toBeInTheDocument();
       expect(screen.getByText("AI Action Distribution")).toBeInTheDocument();
-      expect(screen.getByText("Hourly Call Distribution (24 Hours)")).toBeInTheDocument();
-
-      // 6. Recent Calls Table
-      expect(screen.getByText("Recent AI Inbound Calls")).toBeInTheDocument();
-      expect(screen.getByText("View Full Call History")).toBeInTheDocument();
+      expect(screen.getByText("AI Credit Usage")).toBeInTheDocument();
+      expect(screen.getByText("Requires Staff Attention")).toBeInTheDocument();
+      expect(screen.getByText("Clinical Escalations")).toBeInTheDocument();
     });
   });
 });
