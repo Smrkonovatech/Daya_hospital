@@ -116,7 +116,7 @@ function LoginContent() {
     }
   };
 
-  const handleQuickFill = (role: "admin" | "staff", autoSubmit = true) => {
+  const handleQuickFill = (role: "admin" | "staff", autoSubmit = false) => {
     const email = role === "admin" ? "admin@dayahospital.com" : "staff@dayahospital.com";
     const password = role === "admin" ? "DayaAdmin@2026" : "DayaStaff@2026";
     const opts = { shouldValidate: true, shouldDirty: true, shouldTouch: true };

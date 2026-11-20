@@ -203,7 +203,7 @@ function KnowledgeEditorModalForm({
           {...register("contentMalayalam")}
           rows={3}
           className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0C5DB8]"
-          placeholder="Enter approved Malayalam conversational phrasing for the Sarvam voice model..."
+          placeholder="Enter approved Malayalam conversational phrasing for the Smrko Voice model..."
         />
       </div>
 
@@ -307,7 +307,7 @@ export function KnowledgeEditorModal({
           </span>
         </div>
       }
-      description="Validated clinical and administrative information for Sarvam Malayalam AI voice grounding. Changes are strictly version-controlled."
+      description="Validated clinical and administrative information for Smrko Voice Malayalam AI voice grounding. Changes are strictly version-controlled."
     >
       <KnowledgeEditorModalForm
         key={article?.id || "new-article"}

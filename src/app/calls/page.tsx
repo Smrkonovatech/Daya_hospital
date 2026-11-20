@@ -249,7 +249,7 @@ function CallHistoryContent() {
         {/* Header */}
         <PageHeader
           title="Call History & Detailed Interaction Logs"
-          description="Search, filter, and audit all inbound calls routed to the Daya Sarvam AI Malayalam voice assistant."
+          description="Search, filter, and audit all inbound calls routed to the Daya Smrko Voice Malayalam AI assistant."
           badge={
             <Badge variant="teal" size="sm">
               24/7 Audit Records

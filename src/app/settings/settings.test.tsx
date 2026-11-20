@@ -77,7 +77,7 @@ beforeEach(() => {
             integrations: [
               {
                 id: "sarvam_ai",
-                name: "Sarvam AI Voice Engine (Malayalam)",
+                name: "Smrko Voice Assistant (Malayalam)",
                 status: "Connected (Demo Mode)",
               },
             ],
@@ -86,7 +86,7 @@ beforeEach(() => {
                 id: "inc_01",
                 timestamp: "2026-10-26T14:20:00+05:30",
                 severity: "RESOLVED",
-                title: "Sarvam Voice Model Latency Normalised",
+                title: "Smrko Voice Model Latency Normalised",
                 description: "Latency returned to 240ms.",
               },
             ],
@@ -219,7 +219,7 @@ describe("SettingsPage (Phase 6 - Authentication, Settings & Permissions)", () =
 
     // Gateway cards
     expect(
-      screen.getByText(/Sarvam AI Voice Engine \(Malayalam\)/i)
+      screen.getByText(/Smrko Voice Assistant \(Malayalam\)/i)
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Daya Hospital Management System \(HMS\)/i)
@@ -227,7 +227,7 @@ describe("SettingsPage (Phase 6 - Authentication, Settings & Permissions)", () =
 
     // Incident log
     expect(
-      screen.getByText(/Sarvam Voice Model Latency Normalised/i)
+      screen.getByText(/Smrko Voice Model Latency Normalised/i)
     ).toBeInTheDocument();
   });
 });

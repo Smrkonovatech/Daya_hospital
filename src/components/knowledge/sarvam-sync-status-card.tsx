@@ -29,7 +29,7 @@ export function SarvamSyncStatusCard({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xs font-semibold text-slate-900">
-                Sarvam Voice Agent Synchronization
+                Smrko Voice Agent Synchronization
               </h3>
               <Badge
                 variant={isConfigured ? "success" : "warning"}
@@ -67,7 +67,7 @@ export function SarvamSyncStatusCard({
         <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
         <div className="space-y-0.5 flex-1">
           <p>
-            <strong>Sync Interface Architecture:</strong> Real Sarvam LLM knowledge upload endpoint is cleanly decoupled. In Demo Mode, articles are safely stored in Daya&apos;s local database without issuing false sync confirmations.
+            <strong>Sync Interface Architecture:</strong> Real Smrko Voice LLM knowledge upload endpoint is cleanly decoupled. In Demo Mode, articles are safely stored in Daya&apos;s local database without issuing false sync confirmations.
           </p>
           {syncResult && (
             <p className="text-slate-500 pt-0.5 font-mono text-[10px]">

@@ -106,7 +106,7 @@ describe("KnowledgeBasePage (Phase 5 - Knowledge Base Management)", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Sarvam Voice Agent Synchronization/i)
+        screen.getByText(/Smrko Voice Agent Synchronization/i)
       ).toBeInTheDocument();
     });
 

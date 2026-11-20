@@ -9,10 +9,24 @@ import { TelephonyIvrClient } from "./ivr/telephony-client";
 export * from "./types";
 export { MockDayaHmsAdapter } from "./hms/mock-adapter";
 export { DayaHmsClient } from "./hms/hms-client";
+export { GrandisHmsAdapter } from "./hms/grandis-adapter";
+export * from "./hms/standard-hms-types";
 export { MockSarvamVoiceAdapter } from "./sarvam/mock-adapter";
 export { SarvamVoiceClient } from "./sarvam/sarvam-client";
 export { MockTelephonyIvrAdapter } from "./ivr/mock-adapter";
 export { TelephonyIvrClient } from "./ivr/telephony-client";
+export { BitVoiceTelephonyAdapter } from "./telephony/bitvoice-adapter";
+export type {
+  InboundCallEvent,
+  CallStatusUpdateEvent,
+  CallRoutingDecision,
+  ITelephonyConnector,
+} from "./telephony/standard-telephony-types";
+export { SmrkoVoiceService, smrkoVoiceService } from "./voice/smrko-voice-service";
+export * from "./voice/voice-ai-types";
+export { ApiMappingEngine, GRANDIS_DEFAULT_MAPPING_SCHEMA } from "./mapping/api-mapping-engine";
+export { DAYA_HOSPITAL_CONFIG, getHospitalConfig } from "@/lib/config/hospital-config";
+export { callRoutingEngine } from "@/lib/routing/call-routing-engine";
 export {
   SarvamKnowledgeSyncAdapter,
   sarvamKnowledgeSync,

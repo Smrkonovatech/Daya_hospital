@@ -31,19 +31,19 @@ export function SystemHealthBanner({ health }: SystemHealthBannerProps) {
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Sarvam Malayalam Speech Engine • Daya HMS REST API • 24/7 IVR Rollover Active
+              Smrko Voice Malayalam Speech Engine • Daya HMS REST API • 24/7 IVR Rollover Active
             </p>
           </div>
         </div>
 
         {/* Right: Operational Metrics Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-          {/* Sarvam AI Status */}
+          {/* Voice AI Status */}
           <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-2 border border-slate-100">
             <Cpu className="h-4 w-4 text-[#0C5DB8]" />
             <div>
               <div className="text-[10px] text-slate-500 font-medium">
-                Sarvam Voice
+                Smrko Voice
               </div>
               <div className="font-semibold text-slate-800 flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

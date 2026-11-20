@@ -120,12 +120,12 @@ export default function KnowledgeBasePage() {
             type: "info",
             title: "Demo Mode: Local Save Only",
             message:
-              "Sarvam AI knowledge sync endpoint is unconfigured. Content is safely held in local hospital DB (Demo mode). No false success issued.",
+              "Smrko Voice knowledge sync endpoint is unconfigured. Content is safely held in local hospital DB (Demo mode). No false success issued.",
           });
         } else {
           showToast({
             type: "success",
-            title: "Sarvam Voice Sync Complete",
+            title: "Smrko Voice Sync Complete",
             message: json.syncResult.message,
           });
         }
@@ -373,7 +373,7 @@ export default function KnowledgeBasePage() {
         {/* Page Header */}
         <PageHeader
           title="Hospital Knowledge Base & AI Voice Grounding"
-          description="Approved hospital information, OPD consultation fees, visiting policies, and Malayalam pronunciation guidelines used by the Sarvam AI voice assistant."
+          description="Approved hospital information, OPD consultation fees, visiting policies, and Malayalam pronunciation guidelines used by the Smrko Voice Malayalam AI assistant."
           badge={
             <Badge variant="teal" size="sm">
               Authoritative Grounding Source

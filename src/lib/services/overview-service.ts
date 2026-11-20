@@ -281,14 +281,14 @@ class OverviewService {
       integrationStatus: {
         services: [
           {
-            name: "Sarvam Voice Service",
+            name: "Smrko Voice Service",
             serviceKey: "sarvam",
             state: isDemoData ? "Demo" : "Connected",
             latencyMs: 240,
             lastSync: "2 mins ago",
             notes: isDemoData
               ? "Malayalam speech-to-speech sandbox adapter active"
-              : "Direct Sarvam production cluster",
+              : "Direct Smrko Voice production cluster",
           },
           {
             name: "IVR / Telephony Trunk",

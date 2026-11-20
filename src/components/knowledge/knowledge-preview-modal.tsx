@@ -33,7 +33,7 @@ export function KnowledgePreviewModal({
           <span>Knowledge Grounding Preview</span>
         </div>
       }
-      description="Simulated preview of how this article will be ingested and verbalized by the Sarvam Malayalam AI voice agent."
+      description="Simulated preview of how this article will be ingested and verbalized by the Smrko Voice Malayalam AI assistant."
     >
       <div className="space-y-4 text-xs">
         {/* Header Metadata */}
@@ -72,7 +72,7 @@ export function KnowledgePreviewModal({
         <div className="rounded-lg border border-teal-200 bg-teal-50/40 p-3.5 space-y-2">
           <div className="flex items-center gap-2 text-teal-900 font-semibold">
             <Volume2 className="h-4 w-4 text-[#0E7A71]" />
-            <span>Malayalam Voice Output (Sarvam AI Spoken Dialogue)</span>
+            <span>Malayalam Voice Output (Smrko Voice Spoken Dialogue)</span>
           </div>
           <div className="rounded-md bg-white p-3 border border-teal-100 shadow-2xs">
             <p className="text-xs text-slate-800 leading-relaxed font-sans">

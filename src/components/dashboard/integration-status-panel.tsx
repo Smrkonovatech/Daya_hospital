@@ -97,7 +97,7 @@ export function IntegrationStatusPanel({
               )}
             </div>
             <CardDescription>
-              Operational connectivity for Sarvam Malayalam Voice, IVR Trunk, and Daya HMS
+              Operational connectivity for Smrko Voice Malayalam AI, IVR Trunk, and Daya HMS
             </CardDescription>
           </div>
 

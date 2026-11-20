@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Sidebar } from "./sidebar";
 import { Header } from "./header";
+import { BottomNav } from "./bottom-nav";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -13,33 +13,20 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({
   children,
-  selectedDateRange,
-  onDateRangeChange,
   onRefresh,
 }: DashboardLayoutProps) {
-  const [collapsed, setCollapsed] = React.useState(false);
-  const [mobileOpen, setMobileOpen] = React.useState(false);
-
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#F5F8FC]">
-      {/* Sidebar (Desktop + Mobile Drawer) */}
-      <Sidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed(!collapsed)}
-        mobileOpen={mobileOpen}
-        onCloseMobile={() => setMobileOpen(false)}
-      />
+    <div className="flex min-h-screen w-full flex-col bg-[#F5F8FC] text-[#152238] antialiased">
+      {/* Shared Header (No sidebar anywhere) */}
+      <Header onRefresh={onRefresh} />
 
-      {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        <Header
-          selectedDateRange={selectedDateRange}
-          onDateRangeChange={onDateRangeChange}
-          onRefresh={onRefresh}
-          onToggleMobileMenu={() => setMobileOpen(true)}
-        />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
-      </div>
+      {/* Main Content Area with bottom padding to ensure no content is obscured by bottom nav */}
+      <main className="flex-1 w-full px-2 sm:px-4 lg:px-6 pt-1 pb-16 md:pb-18">
+        {children}
+      </main>
+
+      {/* Persistent Bottom Navigation on every screen */}
+      <BottomNav />
     </div>
   );
 }

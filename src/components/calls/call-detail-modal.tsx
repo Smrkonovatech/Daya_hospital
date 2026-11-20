@@ -93,7 +93,7 @@ function CallDetailInner({
           <div className="flex items-center gap-2">
             <Volume2 className="h-4 w-4 text-[#0C5DB8]" />
             <span className="font-semibold text-slate-800">
-              Encrypted Audio Recording (Sarvam AI Telephony)
+              Encrypted Audio Recording (Voice AI Telephony)
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -380,7 +380,7 @@ export function CallDetailModal({
               <Badge variant="teal">{call.language}</Badge>
             </div>
             <p className="text-xs text-slate-500 font-normal mt-0.5">
-              External Sarvam Session: <span className="font-mono text-slate-700">{call.externalCallId}</span>
+              External Session ID: <span className="font-mono text-slate-700">{call.externalCallId}</span>
             </p>
           </div>
         </div>

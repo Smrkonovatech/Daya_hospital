@@ -29,7 +29,7 @@ export function HealthcareSafeguardsNotice() {
               </Badge>
             </div>
             <p className="text-xs text-slate-600 mt-0.5">
-              Approved articles form the authoritative knowledge source for the Sarvam Malayalam AI voice assistant. All editorial staff must adhere to strict clinical boundaries.
+              Approved articles form the authoritative knowledge source for the Smrko Voice Malayalam AI assistant. All editorial staff must adhere to strict clinical boundaries.
             </p>
           </div>
         </div>

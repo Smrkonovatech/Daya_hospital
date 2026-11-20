@@ -34,7 +34,7 @@ const INITIAL_INCIDENTS: SystemIncident[] = [
     timestamp: "2026-10-26T14:20:00+05:30",
     service: "sarvam_ai",
     severity: "RESOLVED",
-    title: "Sarvam Voice Model Latency Normalised",
+    title: "Smrko Voice Model Latency Normalised",
     description: "Brief peak latency spike of 420ms observed during morning rush. Automated failover restored baseline 240ms.",
     resolvedAt: "2026-10-26T14:35:00+05:30",
   },
@@ -101,7 +101,7 @@ class SettingsService {
       integrations: [
         {
           id: "sarvam_ai",
-          name: "Sarvam AI Voice Assistant (Malayalam)",
+          name: "Smrko Voice Assistant (Malayalam)",
           status: "Connected (Demo Mode)",
           health: "HEALTHY",
           latencyMs: 240,

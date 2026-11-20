@@ -842,7 +842,7 @@ export default function SettingsPage() {
                         Mandatory Malayalam Call Recording Disclosure
                       </span>
                       <span className="text-slate-500 block text-[11px] mt-0.5">
-                        Sarvam agent speaks: &ldquo;സേവന നിലവാരം മെച്ചപ്പെടുത്തുന്നതിനായി ഈ സംഭാഷണം റെക്കോർഡ് ചെയ്യപ്പെടുന്നതാണ്&rdquo; (This call is recorded for quality purposes).
+                        Smrko Voice speaks: &ldquo;സേവന നിലവാരം മെച്ചപ്പെടുത്തുന്നതിനായി ഈ സംഭാഷണം റെക്കോർഡ് ചെയ്യപ്പെടുന്നതാണ്&rdquo; (This call is recorded for quality purposes).
                       </span>
                     </label>
                   </div>
@@ -915,17 +915,17 @@ export default function SettingsPage() {
                     <span>Integration Gateways Health & Connectivity</span>
                   </CardTitle>
                   <CardDescription>
-                    Live health verification of Sarvam Voice, Daya HMS, and Telephony IVR. Credentials and keys are protected server-side.
+                    Live health verification of Smrko Voice, Daya HMS, and Telephony IVR. Credentials and keys are protected server-side.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 text-xs">
-                  {/* Gateway 1: Sarvam AI */}
+                  {/* Gateway 1: Smrko Voice */}
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Cpu className="h-4 w-4 text-[#0C5DB8]" />
                         <span className="font-bold text-slate-900">
-                          Sarvam AI Voice Engine (Malayalam)
+                          Smrko Voice Assistant (Malayalam)
                         </span>
                       </div>
                       <Badge variant="teal">Connected (Demo Mode)</Badge>
@@ -973,7 +973,7 @@ export default function SettingsPage() {
                       <Badge variant="teal">Connected (Demo Mode)</Badge>
                     </div>
                     <p className="text-slate-500 text-[11px]">
-                      Routes busy/unanswered hospital trunk calls to Sarvam SIP gateway with caller CLI forwarding.
+                      Routes busy/unanswered hospital trunk calls to Smrko Voice SIP gateway with caller CLI forwarding.
                     </p>
                     <div className="flex items-center gap-4 text-[11px] text-slate-600 font-mono pt-1 flex-wrap">
                       <span>Capacity: 30 Concurrent Trunks</span>
@@ -985,7 +985,7 @@ export default function SettingsPage() {
                   {/* Hospital Security Policy Notice */}
                   <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-[11px] text-blue-900">
                     <span className="font-bold block">Hospital Security Policy:</span>
-                    Sarvam Agent IDs, HMS authorization tokens, and SIP trunk credentials are kept strictly in server-side environment variables and are never transmitted to client bundles.
+                    Smrko Voice Agent IDs, HMS authorization tokens, and SIP trunk credentials are kept strictly in server-side environment variables and are never transmitted to client bundles.
                   </div>
                 </CardContent>
               </Card>

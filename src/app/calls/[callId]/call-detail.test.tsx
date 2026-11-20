@@ -38,7 +38,7 @@ const { mockCall } = vi.hoisted(() => {
         {
           id: "t_1",
           speaker: "agent",
-          speakerName: "Daya AI (Sarvam)",
+          speakerName: "Daya AI (Smrko Voice)",
           text: "Welcome to Daya General Hospital.",
           malayalamText: "ദയ ജനറൽ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം.",
           timestampMs: 0,
@@ -114,7 +114,7 @@ describe("CallDetailPage (Phase 3)", () => {
       expect(
         screen.getByPlaceholderText("Search dialogue phrases...")
       ).toBeInTheDocument();
-      expect(screen.getAllByText("Daya AI (Sarvam)").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Daya AI (Smrko Voice)").length).toBeGreaterThan(0);
 
       // Section D: Call audio recording
       expect(screen.getByText("D. Call Audio Recording")).toBeInTheDocument();

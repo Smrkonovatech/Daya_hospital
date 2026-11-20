@@ -134,7 +134,7 @@ export function Sidebar({
             {(!collapsed || mobileOpen) && (
               <div className="truncate">
                 <p className="font-semibold leading-tight text-[#0E7A71]">
-                  Sarvam AI Calling
+                  Smrko Voice
                 </p>
                 <p className="text-[11px] text-[#128278] truncate">
                   Malayalam Voice Engine
