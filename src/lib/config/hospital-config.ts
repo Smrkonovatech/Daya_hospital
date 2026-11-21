@@ -42,6 +42,7 @@ export interface TelephonyHospitalConfig {
   provider: TelephonyProviderType;
   providerName: string;
   incomingHospitalNumber: string;
+  aliasPhoneNumbers?: string[];
   forwardingScope: ForwardingScope;
   totalChannels: number;
   apiConfigured: boolean;
@@ -115,6 +116,14 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
     provider: isExotelPrimary ? "EXOTEL" : "BITVOICE",
     providerName: isExotelPrimary ? "Exotel Telephony Cloud" : "BitVoice Telephony",
     incomingHospitalNumber: process.env.EXOTEL_DEFAULT_EXOPHONE || "+914872475000",
+    aliasPhoneNumbers: [
+      "08047291658",
+      "+918047291658",
+      "+914872475000",
+      "04872475000",
+      "+918064265889",
+      "08064265889",
+    ],
     forwardingScope: "APPOINTMENT_ONLY",
     totalChannels: Number(process.env.TELEPHONY_TRUNK_CHANNELS) || 30,
     apiConfigured: Boolean(
@@ -226,7 +235,11 @@ export function resolveHospitalByPhoneNumber(phoneNumber: string): HospitalConfi
     const exoClean = config.telephony.exotel?.defaultExoPhone
       ? normalizePhoneNumber(config.telephony.exotel.defaultExoPhone)
       : "";
-    if (clean === mainClean || clean === exoClean) {
+    const aliases = (config.telephony.aliasPhoneNumbers || []).map((num) =>
+      normalizePhoneNumber(num)
+    );
+
+    if (clean === mainClean || clean === exoClean || aliases.includes(clean)) {
       return config;
     }
   }

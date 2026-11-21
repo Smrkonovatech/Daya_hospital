@@ -21,6 +21,7 @@ import {
 } from "./types";
 import { CallMediaSession, mediaSessionManager } from "./session-manager";
 import { AudioEngine } from "./audio-engine";
+import { getSarvamConfigSummary } from "./sarvam-config";
 
 export class AgentStreamMediaGateway {
   private server: http.Server;
@@ -71,6 +72,7 @@ export class AgentStreamMediaGateway {
             version: "1.0.0",
             status: "ONLINE",
             streamingPath: this.config.path,
+            sarvamAi: getSarvamConfigSummary(),
             activeSessions: mediaSessionManager.getAllActiveSessions().map((s) => s.getSummary()),
           })
         );
@@ -157,6 +159,7 @@ export class AgentStreamMediaGateway {
               mediaFormat: meta.mediaFormat,
               socket: ws,
               audioEngine,
+              autoPlayGreeting: true,
             });
 
             mediaSessionManager.registerSession(activeSession);

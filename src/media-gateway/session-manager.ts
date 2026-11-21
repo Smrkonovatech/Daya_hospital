@@ -4,7 +4,8 @@
  * ============================================================================
  *
  * Manages active Exotel AgentStream sessions, buffers, DTMF, playback markers,
- * and audio queues across concurrent hospital telephone calls.
+ * audio queues, Sarvam STT speech streaming, Hospital Conversation Engine,
+ * and Sarvam TTS audio synthesis across concurrent hospital telephone calls.
  */
 
 import { EventEmitter } from "events";
@@ -18,6 +19,11 @@ import {
 } from "./types";
 import { AudioEngine, AudioPlaybackQueue, defaultAudioEngine } from "./audio-engine";
 import { tenantResolver, TenantResolutionResult } from "./tenant-resolver";
+import { getHospitalConfig, HospitalConfig } from "@/lib/config/hospital-config";
+import { SpeechToTextProvider, TextToSpeechProvider, TranscriptTurnResult } from "./speech-interfaces";
+import { SarvamSpeechToTextProvider } from "./sarvam-stt";
+import { SarvamTextToSpeechProvider } from "./sarvam-tts";
+import { HospitalConversationEngine } from "./conversation-engine";
 
 export interface SocketSender {
   send(data: string, cb?: (err?: Error) => void): void;
@@ -34,6 +40,11 @@ export interface CallSessionInitOptions {
   mediaFormat?: ExotelMediaFormat;
   socket: SocketSender;
   audioEngine?: AudioEngine;
+  sttProvider?: SpeechToTextProvider;
+  ttsProvider?: TextToSpeechProvider;
+  conversationEngine?: HospitalConversationEngine;
+  hospitalConfig?: HospitalConfig;
+  autoPlayGreeting?: boolean;
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -46,6 +57,7 @@ export class CallMediaSession extends EventEmitter {
   public readonly mediaFormat: ExotelMediaFormat;
   public readonly tenantResult: TenantResolutionResult;
   public readonly hospitalId: string;
+  public readonly hospitalConfig: HospitalConfig;
 
   public state: SessionState = "INITIALIZING";
   public readonly createdAt: Date = new Date();
@@ -58,9 +70,21 @@ export class CallMediaSession extends EventEmitter {
   public dtmfDigits: string[] = [];
   public acknowledgedMarks: string[] = [];
 
+  // Phase 2: Live AI Speech & Conversation State
+  public sttStatus: "IDLE" | "CONNECTED" | "STREAMING" | "ERROR" = "IDLE";
+  public ttsStatus: "IDLE" | "SYNTHESIZING" | "PLAYING" | "INTERRUPTED" = "IDLE";
+  public lastCallerTranscript?: string;
+  public lastAiResponse?: string;
+  public conversationTurns: Array<{ speaker: "caller" | "ai"; text: string; timestampMs: number }> = [];
+
+  public readonly sttProvider: SpeechToTextProvider;
+  public readonly ttsProvider: TextToSpeechProvider;
+  public readonly conversationEngine: HospitalConversationEngine;
+
   private socket: SocketSender;
   private audioEngine: AudioEngine;
   private playbackQueue: AudioPlaybackQueue;
+  private autoPlayGreeting: boolean;
 
   constructor(options: CallSessionInitOptions) {
     super();
@@ -73,6 +97,7 @@ export class CallMediaSession extends EventEmitter {
     this.socket = options.socket;
     this.audioEngine = options.audioEngine || defaultAudioEngine;
     this.playbackQueue = new AudioPlaybackQueue(options.streamSid);
+    this.autoPlayGreeting = options.autoPlayGreeting ?? false;
 
     this.mediaFormat = options.mediaFormat || {
       encoding: "audio/x-l16",
@@ -90,23 +115,191 @@ export class CallMediaSession extends EventEmitter {
       customField: options.customField,
     });
     this.hospitalId = this.tenantResult.hospitalId;
+    this.hospitalConfig = options.hospitalConfig || getHospitalConfig(this.hospitalId);
+
+    // AI Components Initialization
+    this.conversationEngine =
+      options.conversationEngine || new HospitalConversationEngine(this.hospitalConfig);
+    this.sttProvider =
+      options.sttProvider ||
+      new SarvamSpeechToTextProvider({ sampleRate: 8000, languageCode: "ml-IN" });
+    this.ttsProvider = options.ttsProvider || new SarvamTextToSpeechProvider();
+
+    this.setupSpeechListeners();
     this.state = "CONNECTED";
+  }
+
+  private setupSpeechListeners(): void {
+    this.sttProvider.onTranscript(async (turn: TranscriptTurnResult) => {
+      this.lastCallerTranscript = turn.text;
+      this.emit("transcript", turn);
+
+      if (turn.isFinal && turn.text.trim()) {
+        this.conversationTurns.push({
+          speaker: "caller",
+          text: turn.text.trim(),
+          timestampMs: turn.timestampMs,
+        });
+
+        await this.handleUserTurn(turn.text.trim());
+      }
+    });
+
+    if ("onSpeechStart" in this.sttProvider) {
+      (this.sttProvider as unknown as { onSpeechStart: (cb: () => void) => void }).onSpeechStart(
+        () => {
+          if (this.ttsStatus === "PLAYING" || this.playbackQueue.hasPending()) {
+            this.interruptPlayback();
+          }
+        }
+      );
+    }
   }
 
   public markStarted(): void {
     this.startedAt = new Date();
     this.state = "STREAMING";
+    this.sttStatus = "CONNECTED";
+
+    this.sttProvider.connect().catch((err) => {
+      console.warn(`[CallSession ${this.callSid}] STT connect error:`, err);
+      this.sttStatus = "ERROR";
+    });
+
     this.emit("started", { streamSid: this.streamSid, callSid: this.callSid });
+
+    if (this.autoPlayGreeting) {
+      this.playInitialGreeting().catch(() => {});
+    }
+  }
+
+  public get isStopped(): boolean {
+    return (this.state as string) === "STOPPED";
+  }
+
+  public get isInterrupted(): boolean {
+    return (this.ttsStatus as string) === "INTERRUPTED";
+  }
+
+  /**
+   * Plays the initial Daya Hospital Malayalam welcome greeting to the caller.
+   */
+  public async playInitialGreeting(): Promise<void> {
+    if (this.isStopped) return;
+
+    const greeting = this.conversationEngine.getInitialGreeting();
+    this.lastAiResponse = greeting;
+    this.ttsStatus = "SYNTHESIZING";
+
+    this.conversationTurns.push({
+      speaker: "ai",
+      text: greeting,
+      timestampMs: Date.now(),
+    });
+
+    try {
+      const pcm = await this.ttsProvider.synthesize(greeting, {
+        language: "ml-IN",
+        voiceId: "kavitha",
+      });
+
+      if (pcm && pcm.length > 0 && !this.isStopped) {
+        await this.streamPcmAudio(pcm);
+      } else {
+        this.ttsStatus = "IDLE";
+      }
+    } catch (err) {
+      console.warn(`[CallSession ${this.callSid}] Greeting synthesis error:`, err);
+      this.ttsStatus = "IDLE";
+    }
+  }
+
+  /**
+   * Processes caller's transcribed utterance, queries Conversation Engine, and speaks response.
+   */
+  public async handleUserTurn(text: string): Promise<void> {
+    if (this.isStopped) return;
+
+    this.ttsStatus = "SYNTHESIZING";
+    const result = await this.conversationEngine.processCallerUtterance(text);
+    this.lastAiResponse = result.replyText;
+
+    this.conversationTurns.push({
+      speaker: "ai",
+      text: result.replyText,
+      timestampMs: Date.now(),
+    });
+
+    this.emit("aiResponse", {
+      streamSid: this.streamSid,
+      text: result.replyText,
+      intent: result.intent,
+      shouldTransfer: result.shouldTransfer,
+      transferDestination: result.transferDestination,
+    });
+
+    try {
+      const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
+        language: "ml-IN",
+        voiceId: "kavitha",
+      });
+
+      if (pcmAudio && pcmAudio.length > 0 && !this.isStopped) {
+        await this.streamPcmAudio(pcmAudio);
+      } else {
+        this.ttsStatus = "IDLE";
+      }
+    } catch (err) {
+      console.warn(`[CallSession ${this.callSid}] Response synthesis error:`, err);
+      this.ttsStatus = "IDLE";
+    }
+  }
+
+  /**
+   * Streams a PCM audio buffer to Exotel in compliant chunks (3200 bytes, multiples of 320).
+   */
+  public async streamPcmAudio(pcmBuffer: Buffer): Promise<void> {
+    this.ttsStatus = "PLAYING";
+    this.playbackQueue.resetInterruption();
+
+    const chunks = this.audioEngine.splitIntoExotelChunks(pcmBuffer, 3200);
+
+    for (const chunk of chunks) {
+      if (this.isStopped || this.isInterrupted) {
+        break;
+      }
+      this.sendOutboundAudio(chunk);
+      // Progressive pacing for 200ms audio chunks
+      await new Promise((r) => setTimeout(r, 180));
+    }
+
+    if (this.ttsStatus === "PLAYING") {
+      this.ttsStatus = "IDLE";
+    }
   }
 
   /**
    * Processes incoming audio chunk from Exotel.
-   * Decodes Base64 into PCM and emits decoded buffer.
+   * Decodes Base64 into PCM, checks VAD for barge-in, and streams to Sarvam STT.
    */
   public handleIncomingMedia(chunk: ExotelMediaChunk): Buffer {
     const pcm = this.audioEngine.decodeBase64Audio(chunk.payload);
     this.audioChunksReceived++;
     this.totalIncomingBytes += pcm.length;
+
+    // Immediate caller barge-in detection: if caller speaks while bot is playing audio
+    if (this.ttsStatus === "PLAYING" || this.playbackQueue.hasPending()) {
+      const rms = this.calculateRms(pcm);
+      if (rms > 400) {
+        this.interruptPlayback();
+      }
+    }
+
+    // Stream PCM to Sarvam STT
+    if (this.sttProvider) {
+      this.sttStatus = "STREAMING";
+      this.sttProvider.sendAudio(pcm).catch(() => {});
+    }
 
     this.emit("media", {
       streamSid: this.streamSid,
@@ -171,6 +364,7 @@ export class CallMediaSession extends EventEmitter {
    */
   public interruptPlayback(): void {
     this.playbackQueue.clear();
+    this.ttsStatus = "INTERRUPTED";
     this.state = "INTERRUPTED";
 
     if (this.socket.readyState === 1) {
@@ -202,7 +396,14 @@ export class CallMediaSession extends EventEmitter {
   public close(): void {
     this.state = "STOPPED";
     this.stoppedAt = new Date();
+    this.ttsStatus = "IDLE";
+    this.sttStatus = "IDLE";
     this.playbackQueue.clear();
+
+    if (this.sttProvider) {
+      this.sttProvider.close().catch(() => {});
+    }
+
     this.emit("stopped", {
       streamSid: this.streamSid,
       callSid: this.callSid,
@@ -210,6 +411,17 @@ export class CallMediaSession extends EventEmitter {
       totalIncomingBytes: this.totalIncomingBytes,
       totalOutgoingBytes: this.totalOutgoingBytes,
     });
+  }
+
+  private calculateRms(buffer: Buffer): number {
+    const sampleCount = Math.floor(buffer.length / 2);
+    if (sampleCount === 0) return 0;
+    let sumSquares = 0;
+    for (let i = 0; i < sampleCount; i++) {
+      const s = buffer.readInt16LE(i * 2);
+      sumSquares += s * s;
+    }
+    return Math.sqrt(sumSquares / sampleCount);
   }
 
   public getSummary() {
@@ -227,6 +439,12 @@ export class CallMediaSession extends EventEmitter {
       outgoingBytes: this.totalOutgoingBytes,
       chunksReceived: this.audioChunksReceived,
       dtmfCount: this.dtmfDigits.length,
+      detectedLanguage: "ml-IN",
+      sttStatus: this.sttStatus,
+      ttsStatus: this.ttsStatus,
+      lastCallerTranscript: this.lastCallerTranscript || null,
+      lastAiResponse: this.lastAiResponse || null,
+      turnCount: this.conversationTurns.length,
     };
   }
 }
@@ -274,4 +492,3 @@ export class MediaSessionManager extends EventEmitter {
 }
 
 export const mediaSessionManager = new MediaSessionManager();
-
