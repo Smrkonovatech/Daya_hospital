@@ -142,19 +142,20 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
       ? "Exotel Cloud IVR with AgentStream bidirectional WebSocket audio streaming to Smrko Voice Media Gateway."
       : "BitVoice handles primary IVR trunk. External AI forwarding configured for appointment calls only.",
     exotel: {
-      accountSid: process.env.EXOTEL_ACCOUNT_SID || "exotel_account_daya_pilot",
+      accountSid: process.env.EXOTEL_ACCOUNT_SID || "smrkonova1",
       apiKey: process.env.EXOTEL_API_KEY || "exotel_key_placeholder",
       apiToken: process.env.EXOTEL_API_TOKEN || "exotel_token_placeholder",
       subdomain: process.env.EXOTEL_SUBDOMAIN || "api",
-      baseUrl:
-        process.env.EXOTEL_BASE_URL ||
-        `https://api.exotel.com/v1/Accounts/${process.env.EXOTEL_ACCOUNT_SID || "exotel_account_daya_pilot"}`,
-      defaultAppId: process.env.EXOTEL_DEFAULT_APP_ID || "app_daya_voicebot_v1",
-      defaultExoPhone: process.env.EXOTEL_DEFAULT_EXOPHONE || "+914872475000",
-      mediaGatewayWsUrl: process.env.VOICE_GATEWAY_PUBLIC_URL || "wss://voice.smrkomed.com/exotel/voicebot",
+      baseUrl: process.env.EXOTEL_BASE_URL || "https://api.exotel.com",
+      defaultAppId: process.env.EXOTEL_DEFAULT_APP_ID || "1393239",
+      defaultExoPhone: process.env.EXOTEL_DEFAULT_EXOPHONE || "08047291658",
+      mediaGatewayWsUrl:
+        process.env.VOICE_GATEWAY_PUBLIC_URL ||
+        "wss://dayahospital-production-467a7d31.up.railway.app/exotel/voicebot",
       webhookSecret: process.env.EXOTEL_WEBHOOK_SECRET || "exotel_webhook_secret_daya_2026",
       statusCallbackUrl:
-        process.env.EXOTEL_STATUS_CALLBACK_URL || "https://daya.smrkomed.com/api/webhooks/exotel",
+        process.env.EXOTEL_STATUS_CALLBACK_URL ||
+        "https://dayahospital-production-467a7d31.up.railway.app/api/webhooks/exotel",
       statusCallbackEvents: ["terminal", "answered", "in-progress"],
       maxCallDurationSeconds: 600,
       ringTimeoutSeconds: 20,

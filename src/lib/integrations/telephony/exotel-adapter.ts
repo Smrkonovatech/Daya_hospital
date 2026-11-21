@@ -10,6 +10,7 @@ import {
   OutboundCallRequest,
   OutboundCallResponse,
   ExotelCallDetails,
+  ExotelAccountDetails,
   TelephonyCallState,
   CallDirection,
 } from "./standard-telephony-types";
@@ -63,14 +64,14 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       options?.baseUrl ||
       exotelConfig?.baseUrl ||
       process.env.EXOTEL_BASE_URL ||
-      `https://api.exotel.com/v1/Accounts/${this.accountSid}`;
+      `https://api.exotel.com`;
     this.defaultAppId =
-      options?.defaultAppId || exotelConfig?.defaultAppId || process.env.EXOTEL_DEFAULT_APP_ID || "app_daya_voicebot_v1";
+      options?.defaultAppId || exotelConfig?.defaultAppId || process.env.EXOTEL_DEFAULT_APP_ID || "1393239";
     this.defaultExoPhone =
       options?.defaultExoPhone ||
       exotelConfig?.defaultExoPhone ||
       process.env.EXOTEL_DEFAULT_EXOPHONE ||
-      config.telephony.incomingHospitalNumber;
+      "08047291658";
     this.webhookSecret =
       options?.webhookSecret ||
       exotelConfig?.webhookSecret ||
@@ -81,6 +82,22 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       exotelConfig?.statusCallbackUrl ||
       process.env.EXOTEL_STATUS_CALLBACK_URL;
     this.totalChannels = config.telephony.totalChannels || 30;
+  }
+
+  public getBaseApiUrl(): string {
+    if (this.baseUrl && this.baseUrl.startsWith("http")) {
+      try {
+        const u = new URL(this.baseUrl);
+        return `${u.protocol}//${u.host}`;
+      } catch {
+        // Fallback below
+      }
+    }
+    return `https://${this.subdomain}.exotel.com`;
+  }
+
+  public getAccountApiUrl(): string {
+    return `${this.getBaseApiUrl()}/v1/Accounts/${this.accountSid}`;
   }
 
   public isLiveConfigured(): boolean {
@@ -95,6 +112,98 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
 
   private getAuthHeader(): string {
     return `Basic ${Buffer.from(`${this.apiKey}:${this.apiToken}`).toString("base64")}`;
+  }
+
+  /**
+   * Secret-safe HTTP fetch with correlation ID, 10s timeout, and rate-limit backoff retry.
+   */
+  public async fetchWithRetry(
+    url: string,
+    options: RequestInit = {},
+    retries = 2
+  ): Promise<Response> {
+    const correlationId = `req_exo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const headers = new Headers(options.headers || {});
+    headers.set("x-correlation-id", correlationId);
+    headers.set("X-Request-Id", correlationId);
+
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        // If rate limited (HTTP 429), back off exponentially and retry
+        if (response.status === 429 && attempt < retries) {
+          const backoffMs = Math.min(2000, 300 * Math.pow(2, attempt) + Math.random() * 100);
+          await new Promise((r) => setTimeout(r, backoffMs));
+          continue;
+        }
+
+        return response;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < retries) {
+          const backoffMs = 200 * Math.pow(2, attempt);
+          await new Promise((r) => setTimeout(r, backoffMs));
+          continue;
+        }
+      }
+    }
+
+    throw lastError || new Error(`Exotel request failed after ${retries} retries`);
+  }
+
+  /**
+   * Retrieves account metadata and billing status.
+   */
+  public async getAccountDetails(): Promise<ExotelAccountDetails | null> {
+    if (!this.isLiveConfigured()) {
+      return {
+        accountSid: this.accountSid || "smrkonova1",
+        friendlyName: "smrkonova1 (Sandbox Mock)",
+        type: "Trial",
+        status: "active",
+        billingType: "prepaid",
+        dateCreated: new Date().toISOString(),
+        dateUpdated: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const endpoint = `${this.getBaseApiUrl()}/v1/Accounts/${this.accountSid}.json`;
+      const res = await this.fetchWithRetry(endpoint, {
+        headers: {
+          Authorization: this.getAuthHeader(),
+          Accept: "application/json",
+        },
+      });
+
+      if (!res.ok) return null;
+      const data = (await res.json()) as { Account?: Record<string, unknown> };
+      const a = data.Account || {};
+
+      return {
+        accountSid: String(a.Sid || this.accountSid),
+        friendlyName: String(a.FriendlyName || ""),
+        type: String(a.Type || "Trial"),
+        status: String(a.Status || "active"),
+        billingType: String(a.BillingType || "prepaid"),
+        dateCreated: String(a.DateCreated || ""),
+        dateUpdated: String(a.DateUpdated || ""),
+        kycStatus: a.KycStatus ? String(a.KycStatus) : undefined,
+      };
+    } catch {
+      return null;
+    }
   }
 
   public async healthCheck(): Promise<{
@@ -115,8 +224,8 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
 
     const start = Date.now();
     try {
-      const url = `https://${this.subdomain}.exotel.com/v1/Accounts/${this.accountSid}.json`;
-      const res = await fetch(url, {
+      const url = `${this.getBaseApiUrl()}/v1/Accounts/${this.accountSid}.json`;
+      const res = await this.fetchWithRetry(url, {
         headers: {
           Authorization: this.getAuthHeader(),
           Accept: "application/json",
@@ -253,7 +362,7 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     const callerId = request.callerId || this.defaultExoPhone;
     const flowUrl =
       request.url ||
-      `http://my.exotel.com/${this.accountSid}/exoml/start_voice/${this.defaultAppId}`;
+      `https://my.exotel.com/${this.accountSid}/exoml/start_voice/${this.defaultAppId}`;
     const customField = request.customField || this.hospitalId;
     const statusCallback = request.statusCallback || this.statusCallbackUrl;
 
@@ -263,7 +372,7 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       return {
         success: true,
         callSid: mockCallSid,
-        accountSid: this.accountSid || "exotel_account_sandbox",
+        accountSid: this.accountSid || "smrkonova1",
         status: "in-progress",
         direction: "outbound-api",
         from: request.from,
@@ -284,26 +393,26 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     }
 
     try {
-      const endpoint = `https://${this.subdomain}.exotel.com/v1/Accounts/${this.accountSid}/Calls/connect.json`;
+      const endpoint = `${this.getAccountApiUrl()}/Calls/connect.json`;
 
       const params = new URLSearchParams();
       params.append("From", request.from);
       params.append("To", request.to);
       params.append("CallerId", callerId);
       params.append("Url", flowUrl);
+      params.append("CallType", "trans");
       if (customField) params.append("CustomField", customField);
       if (statusCallback) params.append("StatusCallback", statusCallback);
-      if (request.timeLimit) params.append("TimeLimit", String(request.timeLimit));
-      if (request.timeOut) params.append("TimeOut", String(request.timeOut));
-      if (request.record !== undefined) params.append("Record", request.record ? "true" : "false");
+      params.append("TimeLimit", String(request.timeLimit || 600));
+      params.append("TimeOut", String(request.timeOut || 30));
+      params.append("Record", request.record !== undefined ? (request.record ? "true" : "false") : "true");
 
-      if (request.statusCallbackEvents) {
-        for (const evt of request.statusCallbackEvents) {
-          params.append("StatusCallbackEvents[]", evt);
-        }
+      const callbackEvents = request.statusCallbackEvents || ["terminal", "answered", "ringing"];
+      for (const evt of callbackEvents) {
+        params.append("StatusCallbackEvents[]", evt);
       }
 
-      const res = await fetch(endpoint, {
+      const res = await this.fetchWithRetry(endpoint, {
         method: "POST",
         headers: {
           Authorization: this.getAuthHeader(),
@@ -316,8 +425,9 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       const data = (await res.json()) as Record<string, unknown>;
 
       if (!res.ok) {
+        const restEx = data?.RestException as Record<string, unknown> | undefined;
         const errorMsg =
-          (data?.RestException as Record<string, unknown>)?.Message ||
+          restEx?.Message ||
           (data?.error as string) ||
           `Exotel API returned HTTP ${res.status}`;
         return {
@@ -370,7 +480,7 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     if (!this.isLiveConfigured()) {
       return {
         callSid,
-        accountSid: this.accountSid || "exotel_account_sandbox",
+        accountSid: this.accountSid || "smrkonova1",
         from: "+919447100000",
         to: this.defaultExoPhone,
         status: "AI_CONNECTED",
@@ -382,8 +492,8 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     }
 
     try {
-      const endpoint = `https://${this.subdomain}.exotel.com/v1/Accounts/${this.accountSid}/Calls/${callSid}.json`;
-      const res = await fetch(endpoint, {
+      const endpoint = `${this.getAccountApiUrl()}/Calls/${callSid}.json`;
+      const res = await this.fetchWithRetry(endpoint, {
         headers: {
           Authorization: this.getAuthHeader(),
           Accept: "application/json",
@@ -402,13 +512,14 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       else if (rawStatus === "no-answer") status = "NO_ANSWER";
       else if (rawStatus === "failed" || rawStatus === "canceled") status = "FAILED";
       else if (rawStatus === "ringing" || rawStatus === "queued") status = "RINGING";
-      else if (rawStatus === "in-progress") status = "AI_CONNECTED";
+      else if (rawStatus === "in-progress" || rawStatus === "answered") status = "AI_CONNECTED";
 
       const dirStr = String(call.Direction || "").toLowerCase();
       const direction: CallDirection = dirStr.includes("inbound") ? "INBOUND" : "OUTBOUND";
 
       return {
         callSid: String(call.Sid || callSid),
+        parentCallSid: call.ParentCallSid ? String(call.ParentCallSid) : undefined,
         accountSid: String(call.AccountSid || this.accountSid),
         from: String(call.From || ""),
         to: String(call.To || ""),
@@ -421,6 +532,8 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
         direction,
         price: call.Price ? String(call.Price) : undefined,
         rawStatus,
+        customField: call.CustomField ? String(call.CustomField) : undefined,
+        answeredBy: call.AnsweredBy ? String(call.AnsweredBy) : undefined,
       };
     } catch {
       return null;
@@ -436,11 +549,11 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     }
 
     try {
-      const endpoint = `https://${this.subdomain}.exotel.com/v1/Accounts/${this.accountSid}/Calls/${callSid}.json`;
+      const endpoint = `${this.getAccountApiUrl()}/Calls/${callSid}.json`;
       const params = new URLSearchParams();
       params.append("Status", "completed");
 
-      const res = await fetch(endpoint, {
+      const res = await this.fetchWithRetry(endpoint, {
         method: "POST",
         headers: {
           Authorization: this.getAuthHeader(),

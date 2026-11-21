@@ -69,8 +69,9 @@ export async function POST(request: NextRequest) {
 
   // 3. Resolve hospital tenant
   const hospital = getHospitalConfig(hospitalId);
-  const callerExoPhone = hospital.telephony.exotel?.defaultExoPhone || hospital.telephony.incomingHospitalNumber;
-  const appId = hospital.telephony.exotel?.defaultAppId || "app_daya_voicebot_v1";
+  const callerExoPhone = hospital.telephony.exotel?.defaultExoPhone || "08047291658";
+  const accountSid = hospital.telephony.exotel?.accountSid || "smrkonova1";
+  const appId = hospital.telephony.exotel?.defaultAppId || "1393239";
 
   // 4. Format numbers for Exotel
   const cleanNumber = toNumber.replace(/\D/g, "").slice(-10);
@@ -82,10 +83,10 @@ export async function POST(request: NextRequest) {
     from: formattedTo,
     to: callerExoPhone,
     callerId: callerExoPhone,
-    url: `http://my.exotel.com/${hospital.telephony.exotel?.accountSid || "exotel_account"}/exoml/start_voice/${appId}`,
+    url: `https://my.exotel.com/${accountSid}/exoml/start_voice/${appId}`,
     customField: customMetadata,
     statusCallback: hospital.telephony.exotel?.statusCallbackUrl,
-    statusCallbackEvents: ["terminal", "answered", "in-progress"],
+    statusCallbackEvents: ["terminal", "answered", "ringing"],
   });
 
   if (!exotelRes.success) {

@@ -120,6 +120,7 @@ export interface OutboundCallResponse {
 
 export interface ExotelCallDetails {
   callSid: string;
+  parentCallSid?: string;
   accountSid: string;
   from: string;
   to: string;
@@ -133,6 +134,33 @@ export interface ExotelCallDetails {
   direction: CallDirection;
   price?: string;
   rawStatus: string;
+  customField?: string;
+  answeredBy?: string;
+}
+
+export interface ExotelAccountDetails {
+  accountSid: string;
+  friendlyName: string;
+  type: string; // "Trial" | "Full"
+  status: string; // "active" | "suspended"
+  billingType: string; // "prepaid" | "postpaid"
+  dateCreated: string;
+  dateUpdated: string;
+  kycStatus?: string;
+}
+
+export interface ExotelRestError {
+  status: number;
+  message: string;
+  code?: number;
+  category:
+    | "RATE_LIMITED"
+    | "AUTHENTICATION_FAILED"
+    | "INVALID_NUMBER"
+    | "INSUFFICIENT_CREDITS"
+    | "FLOW_NOT_FOUND"
+    | "NETWORK_ERROR"
+    | "GENERAL_ERROR";
 }
 
 export interface ITelephonyConnector {

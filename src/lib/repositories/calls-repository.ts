@@ -608,6 +608,30 @@ class CallsRepository {
       endTime?: string;
     }
   ): Promise<CallRecord | null> {
+    const idx = inMemoryCalls.findIndex(
+      (c) =>
+        c.externalCallId === externalCallId ||
+        c.telephonySessionId === externalCallId ||
+        c.id === externalCallId
+    );
+
+    // Out-of-order callback protection:
+    // Do not downgrade a terminal status (ANSWERED, BUSY, MISSED, FAILED, TRANSFERRED)
+    // if a delayed or out-of-order pre-connection event (e.g. RINGING) arrives.
+    let resolvedStatus = update.callStatus;
+    if (idx >= 0 && update.callStatus) {
+      const current = inMemoryCalls[idx];
+      const isTerminal =
+        current.callStatus === "ANSWERED" ||
+        current.callStatus === "BUSY" ||
+        current.callStatus === "MISSED" ||
+        current.callStatus === "FAILED" ||
+        current.callStatus === "TRANSFERRED";
+      if (isTerminal && (update.callStatus as string) === "RINGING") {
+        resolvedStatus = current.callStatus;
+      }
+    }
+
     const dbStatus = await checkDatabaseConnection();
     if (dbStatus.connected) {
       try {
@@ -620,7 +644,7 @@ class CallsRepository {
             ],
           },
           data: {
-            callStatus: update.callStatus,
+            callStatus: resolvedStatus,
             durationSeconds: update.durationSeconds,
             endTime: update.endTime ? new Date(update.endTime) : undefined,
             failureReason: update.failureReason,
@@ -632,18 +656,11 @@ class CallsRepository {
       }
     }
 
-    const idx = inMemoryCalls.findIndex(
-      (c) =>
-        c.externalCallId === externalCallId ||
-        c.telephonySessionId === externalCallId ||
-        c.id === externalCallId
-    );
-
     if (idx === -1) return null;
     inMemoryCalls[idx] = {
       ...inMemoryCalls[idx],
       ...update,
-      callStatus: update.callStatus || inMemoryCalls[idx].callStatus,
+      callStatus: resolvedStatus || inMemoryCalls[idx].callStatus,
       durationSeconds:
         update.durationSeconds !== undefined
           ? update.durationSeconds

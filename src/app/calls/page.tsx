@@ -14,11 +14,13 @@ import {
   ArrowDown,
   ExternalLink,
   Phone,
+  PhoneOutgoing,
   Clock,
   RotateCcw,
   AlertTriangle,
   UserCheck,
 } from "lucide-react";
+import { InitiateCallDialog } from "@/components/calls/initiate-call-dialog";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,6 +64,9 @@ function CallHistoryContent() {
 
   // Privacy reveal toggle
   const [revealAllPhones, setRevealAllPhones] = React.useState(false);
+
+  // Outbound call modal
+  const [isInitiateOpen, setIsInitiateOpen] = React.useState(false);
 
   // Data fetching state
   const [calls, setCalls] = React.useState<CallRecord[]>([]);
@@ -290,6 +295,16 @@ function CallHistoryContent() {
               >
                 <Download className="h-3.5 w-3.5 text-slate-500" />
                 <span>Export CSV</span>
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setIsInitiateOpen(true)}
+                className="gap-1.5 text-xs bg-[#0C5DB8] hover:bg-[#0A4D9A] text-white"
+                title="Initiate outbound AI telephone call via Exotel"
+              >
+                <PhoneOutgoing className="h-3.5 w-3.5" />
+                <span>Initiate AI Call</span>
               </Button>
             </div>
           }
@@ -849,6 +864,35 @@ function CallHistoryContent() {
             )}
           </CardContent>
         </Card>
+
+        <InitiateCallDialog
+          isOpen={isInitiateOpen}
+          onClose={() => setIsInitiateOpen(false)}
+          onCallInitiated={() => {
+            setCurrentPage(1);
+            callsService
+              .getCalls({
+                searchQuery,
+                dateRange,
+                status: statusFilter,
+                intent: intentFilter,
+                language: languageFilter,
+                actionType: actionTypeFilter,
+                followUp: followUpFilter,
+                durationRange,
+                sortBy,
+                sortOrder,
+                page: 1,
+                limit: itemsPerPage,
+              })
+              .then((result) => {
+                setCalls(result.calls);
+                setTotalCount(result.totalCount);
+                setTotalPages(result.totalPages);
+              })
+              .catch(() => {});
+          }}
+        />
       </div>
     </DashboardLayout>
   );
