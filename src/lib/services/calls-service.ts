@@ -139,6 +139,32 @@ class CallsService {
 
     return [headers.join(","), ...rows].join("\n");
   }
+
+  /**
+   * Records a new inbound or outbound call session in the ledger.
+   */
+  async createCallRecord(
+    call: Partial<CallRecord> & { id: string; callerNumber: string }
+  ): Promise<CallRecord> {
+    return callsRepository.createCallRecord(call);
+  }
+
+  /**
+   * Updates an existing call session by its external provider ID (e.g. Exotel Call SID).
+   */
+  async updateCallStatusByExternalId(
+    externalCallId: string,
+    update: {
+      callStatus?: CallRecord["callStatus"];
+      durationSeconds?: number;
+      recordingUrl?: string;
+      recordingSid?: string;
+      failureReason?: string;
+      endTime?: string;
+    }
+  ): Promise<CallRecord | null> {
+    return callsRepository.updateCallStatusByExternalId(externalCallId, update);
+  }
 }
 
 export const callsService = new CallsService();

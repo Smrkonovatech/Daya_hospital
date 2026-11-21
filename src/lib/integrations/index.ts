@@ -5,6 +5,7 @@ import { MockSarvamVoiceAdapter } from "./sarvam/mock-adapter";
 import { SarvamVoiceClient } from "./sarvam/sarvam-client";
 import { MockTelephonyIvrAdapter } from "./ivr/mock-adapter";
 import { TelephonyIvrClient } from "./ivr/telephony-client";
+import { ExotelTelephonyAdapter } from "./telephony/exotel-adapter";
 
 export * from "./types";
 export { MockDayaHmsAdapter } from "./hms/mock-adapter";
@@ -16,11 +17,15 @@ export { SarvamVoiceClient } from "./sarvam/sarvam-client";
 export { MockTelephonyIvrAdapter } from "./ivr/mock-adapter";
 export { TelephonyIvrClient } from "./ivr/telephony-client";
 export { BitVoiceTelephonyAdapter } from "./telephony/bitvoice-adapter";
+export { ExotelTelephonyAdapter } from "./telephony/exotel-adapter";
 export type {
   InboundCallEvent,
   CallStatusUpdateEvent,
   CallRoutingDecision,
   ITelephonyConnector,
+  OutboundCallRequest,
+  OutboundCallResponse,
+  ExotelCallDetails,
 } from "./telephony/standard-telephony-types";
 export { SmrkoVoiceService, smrkoVoiceService } from "./voice/smrko-voice-service";
 export * from "./voice/voice-ai-types";
@@ -38,6 +43,7 @@ class IntegrationRegistry {
   private hmsAdapter: IDayaHmsAdapter;
   private sarvamAdapter: ISarvamVoiceAdapter;
   private ivrAdapter: ITelephonyIvrAdapter;
+  private exotelAdapter: ExotelTelephonyAdapter;
 
   constructor() {
     // When production credentials exist in environment variables, use the production clients;
@@ -49,6 +55,7 @@ class IntegrationRegistry {
     this.hmsAdapter = isHmsProd ? new DayaHmsClient() : new MockDayaHmsAdapter();
     this.sarvamAdapter = isSarvamProd ? new SarvamVoiceClient() : new MockSarvamVoiceAdapter();
     this.ivrAdapter = isIvrProd ? new TelephonyIvrClient() : new MockTelephonyIvrAdapter();
+    this.exotelAdapter = new ExotelTelephonyAdapter();
   }
 
   getHmsAdapter(): IDayaHmsAdapter {
@@ -63,17 +70,30 @@ class IntegrationRegistry {
     return this.ivrAdapter;
   }
 
+  getExotelAdapter(): ExotelTelephonyAdapter {
+    return this.exotelAdapter;
+  }
+
   async getAllHealthStatuses() {
-    const [hms, sarvam, ivr] = await Promise.all([
+    const [hms, sarvam, ivr, exotel] = await Promise.all([
       this.hmsAdapter.healthCheck(),
       this.sarvamAdapter.healthCheck(),
       this.ivrAdapter.healthCheck(),
+      this.exotelAdapter.healthCheck(),
     ]);
 
     return {
       hms,
       sarvam,
       ivr,
+      exotel: {
+        service: "exotel_telephony",
+        status: exotel.status,
+        latencyMs: exotel.latencyMs,
+        mode: exotel.mode,
+        lastChecked: new Date().toISOString(),
+        details: exotel.details,
+      },
       allHealthy:
         hms.status === "HEALTHY" &&
         sarvam.status === "HEALTHY" &&
@@ -83,3 +103,4 @@ class IntegrationRegistry {
 }
 
 export const integrations = new IntegrationRegistry();
+export const exotelAdapter = new ExotelTelephonyAdapter();

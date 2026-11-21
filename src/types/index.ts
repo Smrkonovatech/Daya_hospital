@@ -37,6 +37,8 @@ export interface SystemIncident {
 
 export type CallStatus = "ANSWERED" | "BUSY" | "MISSED" | "TRANSFERRED" | "FAILED";
 
+export type CallDirection = "INBOUND" | "OUTBOUND";
+
 export type CallSource = "IVR_ROLLOVER" | "DIRECT_HOTLINE" | "OFF_HOURS";
 
 export type CallLanguage = "MALAYALAM" | "MANGLISH" | "ENGLISH";
@@ -116,6 +118,8 @@ export interface CallReviewEntry {
 export interface CallRecord {
   id: string;
   externalCallId?: string;
+  telephonySessionId?: string;
+  patientUhid?: string;
   callerNumber: string;
   callerName?: string;
   startTime: string;
@@ -140,6 +144,15 @@ export interface CallRecord {
   reviewedBy?: string;
   reviewedAt?: string;
   reviewHistory?: CallReviewEntry[];
+  hospitalId?: string;
+  provider?: string;
+  direction?: CallDirection;
+  telephonyAccountSid?: string;
+  streamSid?: string;
+  fromNumber?: string;
+  toNumber?: string;
+  failureReason?: string;
+  recordingSid?: string;
 }
 
 export interface ActionReviewEntry {

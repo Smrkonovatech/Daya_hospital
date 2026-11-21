@@ -38,6 +38,11 @@ enum CallSource {
   OFF_HOURS
 }
 
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
 enum CallLanguage {
   MALAYALAM
   MANGLISH
@@ -180,6 +185,15 @@ model CallRecord {
   isReviewed         Boolean            @default(false)
   reviewedBy         String?
   reviewedAt         DateTime?
+  hospitalId         String             @default("hosp_daya_thrissur")
+  provider           String             @default("EXOTEL")
+  direction          CallDirection      @default(INBOUND)
+  telephonyAccountSid String?
+  streamSid          String?
+  fromNumber         String?
+  toNumber           String?
+  failureReason      String?
+  recordingSid       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -194,6 +208,9 @@ model CallRecord {
   @@index([language])
   @@index([startTime])
   @@index([requiresFollowUp])
+  @@index([hospitalId])
+  @@index([direction])
+  @@index([streamSid])
 }
 
 model TranscriptEntry {
@@ -436,4 +453,26 @@ model HospitalSetting {
   hmsTimeoutThresholdMs       Int      @default(3000)
   lastUpdatedBy               String?
   updatedAt                   DateTime @updatedAt
+}
+
+// ----------------------------------------------------
+// 8. MULTI-HOSPITAL SAAS TENANTS
+// ----------------------------------------------------
+
+model Hospital {
+  id                  String   @id
+  name                String
+  shortName           String
+  city                String
+  state               String
+  status              String   @default("ACTIVE")
+  telephonyProvider   String   @default("EXOTEL")
+  exotelAccountSid    String?
+  exotelApiKey        String?
+  exotelAppId         String?
+  exotelVirtualNumber String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([status])
 }

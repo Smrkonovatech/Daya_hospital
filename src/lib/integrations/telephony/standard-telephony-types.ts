@@ -17,7 +17,9 @@ export type TelephonyCallState =
   | "TRANSFERRED_TO_STAFF"
   | "COMPLETED"
   | "MISSED"
-  | "FAILED";
+  | "FAILED"
+  | "BUSY"
+  | "NO_ANSWER";
 
 export interface InboundCallEvent {
   event_id: string;
@@ -30,6 +32,9 @@ export interface InboundCallEvent {
   initial_intent?: string;
   ivr_digits?: string;
   hop_count: number;
+  direction?: CallDirection;
+  provider?: string;
+  rawPayload?: Record<string, unknown>;
 }
 
 export interface CallStatusUpdateEvent {
@@ -39,9 +44,14 @@ export interface CallStatusUpdateEvent {
   state: TelephonyCallState;
   duration_seconds?: number;
   recording_url?: string;
+  recording_sid?: string;
   transfer_destination?: string;
   failure_reason?: string;
+  direction?: CallDirection;
+  from_number?: string;
+  to_number?: string;
   timestamp: string;
+  rawPayload?: Record<string, unknown>;
 }
 
 export interface CallRoutingDecision {
@@ -76,6 +86,55 @@ export interface TelephonyTransferResult {
   error?: string;
 }
 
+/**
+ * Standard parameters for initiating programmable outbound phone calls
+ * via telephony providers (e.g., Exotel connect API).
+ */
+export interface OutboundCallRequest {
+  from: string; // Patient destination or agent
+  to: string; // Exotel virtual number / Voicebot flow
+  callerId?: string; // Hospital ExoPhone
+  url?: string; // Applet Flow URL (e.g., start_voice/<appId>)
+  customField?: string; // Tenant/session correlation metadata
+  statusCallback?: string;
+  statusCallbackEvents?: string[];
+  record?: boolean;
+  timeLimit?: number; // max seconds
+  timeOut?: number; // ring timeout in seconds
+}
+
+export interface OutboundCallResponse {
+  success: boolean;
+  callSid: string;
+  accountSid: string;
+  status: string;
+  direction: string;
+  from: string;
+  to: string;
+  dateCreated: string;
+  phoneNumberSid?: string;
+  uri?: string;
+  error?: string;
+  rawResponse?: Record<string, unknown>;
+}
+
+export interface ExotelCallDetails {
+  callSid: string;
+  accountSid: string;
+  from: string;
+  to: string;
+  phoneNumberSid?: string;
+  status: TelephonyCallState;
+  startTime?: string;
+  endTime?: string;
+  durationSeconds?: number;
+  recordingUrl?: string;
+  recordingSid?: string;
+  direction: CallDirection;
+  price?: string;
+  rawStatus: string;
+}
+
 export interface ITelephonyConnector {
   healthCheck(): Promise<{
     status: "HEALTHY" | "DEGRADED" | "DOWN";
@@ -93,5 +152,10 @@ export interface ITelephonyConnector {
   ): Promise<TelephonyTransferResult>;
   verifyWebhookSignature(rawBody: string, signature: string): boolean;
   parseWebhookPayload(rawPayload: unknown): InboundCallEvent | CallStatusUpdateEvent | null;
-}
 
+  // Optional extended capabilities for outbound calling & Exotel API
+  initiateOutboundCall?(request: OutboundCallRequest): Promise<OutboundCallResponse>;
+  getCallDetails?(callSid: string): Promise<ExotelCallDetails | null>;
+  terminateCall?(callSid: string): Promise<{ success: boolean; error?: string }>;
+  getCallRecording?(callSid: string): Promise<{ recordingUrl?: string; recordingSid?: string; durationSeconds?: number } | null>;
+}

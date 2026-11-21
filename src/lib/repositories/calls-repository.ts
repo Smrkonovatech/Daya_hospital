@@ -399,7 +399,9 @@ class CallsRepository {
       }
     }
 
-    const found = inMemoryCalls.find((c) => c.id === callId);
+    const found = inMemoryCalls.find(
+      (c) => c.id === callId || c.externalCallId === callId || c.telephonySessionId === callId
+    );
     return found ? { ...found } : null;
   }
 
@@ -490,6 +492,167 @@ class CallsRepository {
 
     inMemoryCalls[idx] = updatedCall;
     return updatedCall;
+  }
+
+  /**
+   * Creates or records a new call record (e.g. from Exotel outbound initiation or incoming stream).
+   */
+  async createCallRecord(
+    call: Partial<CallRecord> & { id: string; callerNumber: string }
+  ): Promise<CallRecord> {
+    const now = new Date();
+    const newRecord: CallRecord = {
+      id: call.id,
+      externalCallId: call.externalCallId,
+      telephonySessionId: call.telephonySessionId || call.externalCallId,
+      callerNumber: call.callerNumber,
+      callerName: call.callerName || (call.direction === "OUTBOUND" ? "Outbound Patient" : "Incoming Patient"),
+      patientUhid: call.patientUhid,
+      startTime: call.startTime || now.toISOString(),
+      endTime: call.endTime,
+      durationSeconds: call.durationSeconds || 0,
+      callStatus: call.callStatus || "ANSWERED",
+      callSource: call.callSource || (call.direction === "OUTBOUND" ? "DIRECT_HOTLINE" : "IVR_ROLLOVER"),
+      language: call.language || "MALAYALAM",
+      intentCategory: call.intentCategory || (call.direction === "OUTBOUND" ? "APPOINTMENT_BOOKING" : "GENERAL_QUERY"),
+      aiSummary:
+        call.aiSummary ||
+        (call.direction === "OUTBOUND"
+          ? "Outbound consultation follow-up initiated via Exotel."
+          : "Inbound hospital telephony enquiry."),
+      aiConfidence: call.aiConfidence || 0.95,
+      transcript: call.transcript || [],
+      recordingUrl: call.recordingUrl,
+      requiresFollowUp: call.requiresFollowUp || false,
+      followUpStatus: call.followUpStatus || "NOT_REQUIRED",
+      actions: call.actions || [],
+      hospitalId: call.hospitalId || "hosp_daya_thrissur",
+      provider: call.provider || "EXOTEL",
+      direction: call.direction || "INBOUND",
+      telephonyAccountSid: call.telephonyAccountSid,
+      streamSid: call.streamSid,
+      fromNumber: call.fromNumber || call.callerNumber,
+      toNumber: call.toNumber,
+      failureReason: call.failureReason,
+      recordingSid: call.recordingSid,
+      reviewHistory: [],
+    };
+
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        await prisma.callRecord.upsert({
+          where: { id: call.id },
+          create: {
+            id: newRecord.id,
+            externalCallId: newRecord.externalCallId,
+            telephonySessionId: newRecord.telephonySessionId,
+            callerNumber: newRecord.callerNumber,
+            callerName: newRecord.callerName,
+            patientUhid: newRecord.patientUhid,
+            startTime: new Date(newRecord.startTime),
+            endTime: newRecord.endTime ? new Date(newRecord.endTime) : undefined,
+            durationSeconds: newRecord.durationSeconds,
+            callStatus: newRecord.callStatus,
+            callSource: newRecord.callSource,
+            language: newRecord.language,
+            intentCategory: newRecord.intentCategory,
+            aiSummary: newRecord.aiSummary,
+            aiConfidence: newRecord.aiConfidence,
+            requiresFollowUp: newRecord.requiresFollowUp,
+            followUpStatus: newRecord.followUpStatus,
+            hospitalId: newRecord.hospitalId || "hosp_daya_thrissur",
+            provider: newRecord.provider || "EXOTEL",
+            direction: newRecord.direction || "INBOUND",
+            telephonyAccountSid: newRecord.telephonyAccountSid,
+            streamSid: newRecord.streamSid,
+            fromNumber: newRecord.fromNumber,
+            toNumber: newRecord.toNumber,
+            failureReason: newRecord.failureReason,
+            recordingSid: newRecord.recordingSid,
+          },
+          update: {
+            callStatus: newRecord.callStatus,
+            durationSeconds: newRecord.durationSeconds,
+            endTime: newRecord.endTime ? new Date(newRecord.endTime) : undefined,
+            failureReason: newRecord.failureReason,
+            recordingSid: newRecord.recordingSid,
+          },
+        });
+      } catch (err) {
+        console.warn("DB createCallRecord failed, falling back to memory:", err);
+      }
+    }
+
+    const existingIdx = inMemoryCalls.findIndex((c) => c.id === call.id);
+    if (existingIdx >= 0) {
+      inMemoryCalls[existingIdx] = { ...inMemoryCalls[existingIdx], ...newRecord };
+    } else {
+      inMemoryCalls.unshift(newRecord);
+    }
+
+    return newRecord;
+  }
+
+  /**
+   * Updates call status, duration, and recording by external Exotel Call SID.
+   */
+  async updateCallStatusByExternalId(
+    externalCallId: string,
+    update: {
+      callStatus?: CallStatus;
+      durationSeconds?: number;
+      recordingUrl?: string;
+      recordingSid?: string;
+      failureReason?: string;
+      endTime?: string;
+    }
+  ): Promise<CallRecord | null> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        await prisma.callRecord.updateMany({
+          where: {
+            OR: [
+              { externalCallId },
+              { telephonySessionId: externalCallId },
+              { id: externalCallId },
+            ],
+          },
+          data: {
+            callStatus: update.callStatus,
+            durationSeconds: update.durationSeconds,
+            endTime: update.endTime ? new Date(update.endTime) : undefined,
+            failureReason: update.failureReason,
+            recordingSid: update.recordingSid,
+          },
+        });
+      } catch (err) {
+        console.warn("DB updateCallStatusByExternalId failed:", err);
+      }
+    }
+
+    const idx = inMemoryCalls.findIndex(
+      (c) =>
+        c.externalCallId === externalCallId ||
+        c.telephonySessionId === externalCallId ||
+        c.id === externalCallId
+    );
+
+    if (idx === -1) return null;
+    inMemoryCalls[idx] = {
+      ...inMemoryCalls[idx],
+      ...update,
+      callStatus: update.callStatus || inMemoryCalls[idx].callStatus,
+      durationSeconds:
+        update.durationSeconds !== undefined
+          ? update.durationSeconds
+          : inMemoryCalls[idx].durationSeconds,
+      recordingUrl: update.recordingUrl || inMemoryCalls[idx].recordingUrl,
+      endTime: update.endTime || inMemoryCalls[idx].endTime,
+      failureReason: update.failureReason || inMemoryCalls[idx].failureReason,
+    };
+    return inMemoryCalls[idx];
   }
 }
 

@@ -377,6 +377,18 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
               </div>
 
               <div className="flex justify-between py-1 border-b border-slate-100">
+                <span className="text-slate-500 font-medium">Telephony Provider:</span>
+                <div className="inline-flex items-center gap-1.5 font-semibold text-purple-800">
+                  <Badge variant="outline" size="sm" className="bg-purple-50 text-purple-700 border-purple-200">
+                    {call.provider || "EXOTEL"}
+                  </Badge>
+                  <span className="text-[10px] text-slate-500 font-normal">
+                    ({call.direction === "OUTBOUND" ? "Outbound" : "Inbound"})
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-between py-1 border-b border-slate-100">
                 <span className="text-slate-500 font-medium">Call Time:</span>
                 <span className="text-slate-800 font-medium">
                   {formatDateTime(call.startTime)}

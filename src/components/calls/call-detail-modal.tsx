@@ -45,7 +45,7 @@ function CallDetailInner({
   return (
     <div className="space-y-5">
       {/* Top Info Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl bg-slate-50 p-3.5 border border-slate-200/80 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 rounded-xl bg-slate-50 p-3.5 border border-slate-200/80 text-xs">
         <div>
           <div className="text-[10px] text-slate-400 font-medium">Caller Number</div>
           <div className="flex items-center gap-1.5 mt-0.5 font-semibold text-slate-900">
@@ -83,6 +83,18 @@ function CallDetailInner({
               : call.callSource === "DIRECT_HOTLINE"
               ? "Direct Hotline"
               : "Off-Hours Service"}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] text-slate-400 font-medium">Telephony Provider</div>
+          <div className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1.5">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+              {call.provider || "EXOTEL"}
+            </span>
+            <span className="text-[10px] text-slate-500 font-normal">
+              {call.direction === "OUTBOUND" ? "Outbound" : "Inbound"}
+            </span>
           </div>
         </div>
       </div>

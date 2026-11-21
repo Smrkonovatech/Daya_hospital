@@ -961,24 +961,25 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Gateway 3: IVR Trunk */}
+                  {/* Gateway 3: IVR & Exotel Telephony */}
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Radio className="h-4 w-4 text-sky-600" />
                         <span className="font-bold text-slate-900">
-                          Hospital IVR & SIP Telephony Provider
+                          Hospital Telephony Provider: Exotel Cloud & AgentStream
                         </span>
                       </div>
-                      <Badge variant="teal">Connected (Demo Mode)</Badge>
+                      <Badge variant="teal">Connected (Exotel Cloud)</Badge>
                     </div>
                     <p className="text-slate-500 text-[11px]">
-                      Routes busy/unanswered hospital trunk calls to Smrko Voice SIP gateway with caller CLI forwarding.
+                      Routes incoming patient phone calls and outbound reminders via Exotel Cloud Telephony. Real-time audio streaming is orchestrated via the persistent Smrko Voice Media Gateway WebSocket.
                     </p>
                     <div className="flex items-center gap-4 text-[11px] text-slate-600 font-mono pt-1 flex-wrap">
-                      <span>Capacity: 30 Concurrent Trunks</span>
-                      <span>Active Channels: 18 Calls</span>
-                      <span className="text-emerald-700 font-semibold">Audio Codec: G.711 / Opus</span>
+                      <span>ExoPhone: +91 487 2475000</span>
+                      <span>Audio Codec: PCM 16-bit 8000Hz</span>
+                      <span>Gateway: wss://voice.smrkomed.com/exotel/voicebot</span>
+                      <span className="text-emerald-700 font-semibold">Capacity: 30 Concurrent Trunks</span>
                     </div>
                   </div>
 

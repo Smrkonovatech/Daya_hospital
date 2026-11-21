@@ -7,7 +7,7 @@
  * consumed by the AI Calling module and cleanly attachable to the parent
  * HMS platform (Smartcom Admin / Tenant Management) in future deployments.
  *
- * Prevents hardcoding hospital-specific parameters in core business logic.
+ * Supports multi-hospital SaaS tenant mapping for Exotel & BitVoice telephony.
  */
 
 export type TelephonyProviderType =
@@ -22,6 +22,22 @@ export type HmsProductType = "GRANDIS" | "CUSTOM_REST" | "MOCK";
 
 export type ForwardingScope = "APPOINTMENT_ONLY" | "ALL_IVR" | "OFF_HOURS";
 
+export interface ExotelHospitalConfig {
+  accountSid: string;
+  apiKey: string;
+  apiToken: string;
+  subdomain?: string;
+  baseUrl?: string;
+  defaultAppId?: string; // Voicebot Applet ID
+  defaultExoPhone?: string; // Virtual incoming/outbound number (+91...)
+  mediaGatewayWsUrl?: string; // wss://voice.smrkomed.com/exotel/voicebot
+  webhookSecret?: string;
+  statusCallbackUrl?: string;
+  statusCallbackEvents?: string[];
+  maxCallDurationSeconds?: number;
+  ringTimeoutSeconds?: number;
+}
+
 export interface TelephonyHospitalConfig {
   provider: TelephonyProviderType;
   providerName: string;
@@ -34,6 +50,7 @@ export interface TelephonyHospitalConfig {
   apiKey?: string;
   status: "CONFIRMED" | "PENDING_CONFIRMATION" | "MOCK_SANDBOX";
   providerCoordinationNotes: string;
+  exotel?: ExotelHospitalConfig;
 }
 
 export interface HmsHospitalConfig {
@@ -82,6 +99,9 @@ export interface HospitalConfig {
   routing: RoutingHospitalConfig;
 }
 
+const isExotelPrimary =
+  process.env.TELEPHONY_PROVIDER === "EXOTEL" || Boolean(process.env.EXOTEL_ACCOUNT_SID);
+
 /**
  * Confirmed pilot configuration for Daya General Hospital Ltd & Specialty Surgical Centre.
  */
@@ -92,18 +112,44 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
   city: "Thrissur",
   state: "Kerala",
   telephony: {
-    provider: "BITVOICE",
-    providerName: "BitVoice Telephony",
-    incomingHospitalNumber: "+914872475000",
+    provider: isExotelPrimary ? "EXOTEL" : "BITVOICE",
+    providerName: isExotelPrimary ? "Exotel Telephony Cloud" : "BitVoice Telephony",
+    incomingHospitalNumber: process.env.EXOTEL_DEFAULT_EXOPHONE || "+914872475000",
     forwardingScope: "APPOINTMENT_ONLY",
-    totalChannels: 30,
-    apiConfigured: false, // Awaiting official API & webhook confirmation from BitVoice
-    webhookSecret: process.env.BITVOICE_WEBHOOK_SECRET,
+    totalChannels: Number(process.env.TELEPHONY_TRUNK_CHANNELS) || 30,
+    apiConfigured: Boolean(
+      (process.env.EXOTEL_API_KEY && process.env.EXOTEL_API_TOKEN) ||
+        (process.env.BITVOICE_API_KEY && process.env.BITVOICE_SIP_GATEWAY)
+    ),
+    webhookSecret:
+      process.env.EXOTEL_WEBHOOK_SECRET || process.env.BITVOICE_WEBHOOK_SECRET || "smrko_telephony_secret_2026",
     sipGateway: process.env.BITVOICE_SIP_GATEWAY,
-    apiKey: process.env.BITVOICE_API_KEY,
-    status: "PENDING_CONFIRMATION",
-    providerCoordinationNotes:
-      "BitVoice handles primary IVR trunk. External AI forwarding configured for appointment calls only. APIs and webhooks pending confirmation.",
+    apiKey: process.env.EXOTEL_API_KEY || process.env.BITVOICE_API_KEY,
+    status:
+      process.env.EXOTEL_API_KEY || process.env.BITVOICE_API_KEY
+        ? "CONFIRMED"
+        : "PENDING_CONFIRMATION",
+    providerCoordinationNotes: isExotelPrimary
+      ? "Exotel Cloud IVR with AgentStream bidirectional WebSocket audio streaming to Smrko Voice Media Gateway."
+      : "BitVoice handles primary IVR trunk. External AI forwarding configured for appointment calls only.",
+    exotel: {
+      accountSid: process.env.EXOTEL_ACCOUNT_SID || "exotel_account_daya_pilot",
+      apiKey: process.env.EXOTEL_API_KEY || "exotel_key_placeholder",
+      apiToken: process.env.EXOTEL_API_TOKEN || "exotel_token_placeholder",
+      subdomain: process.env.EXOTEL_SUBDOMAIN || "api",
+      baseUrl:
+        process.env.EXOTEL_BASE_URL ||
+        `https://api.exotel.com/v1/Accounts/${process.env.EXOTEL_ACCOUNT_SID || "exotel_account_daya_pilot"}`,
+      defaultAppId: process.env.EXOTEL_DEFAULT_APP_ID || "app_daya_voicebot_v1",
+      defaultExoPhone: process.env.EXOTEL_DEFAULT_EXOPHONE || "+914872475000",
+      mediaGatewayWsUrl: process.env.VOICE_GATEWAY_PUBLIC_URL || "wss://voice.smrkomed.com/exotel/voicebot",
+      webhookSecret: process.env.EXOTEL_WEBHOOK_SECRET || "exotel_webhook_secret_daya_2026",
+      statusCallbackUrl:
+        process.env.EXOTEL_STATUS_CALLBACK_URL || "https://daya.smrkomed.com/api/webhooks/exotel",
+      statusCallbackEvents: ["terminal", "answered", "in-progress"],
+      maxCallDurationSeconds: 600,
+      ringTimeoutSeconds: 20,
+    },
   },
   hms: {
     product: "GRANDIS",
@@ -139,17 +185,67 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
 };
 
 /**
+ * Multi-Hospital Tenant Directory
+ */
+export const HOSPITAL_REGISTRY: Record<string, HospitalConfig> = {
+  hosp_daya_thrissur: DAYA_HOSPITAL_CONFIG,
+};
+
+/**
  * Returns active hospital configuration.
  * Resolves to Daya Hospital in standalone pilot mode, or tenant context when integrated with Smartcom Admin.
  */
 export function getHospitalConfig(hospitalId?: string): HospitalConfig {
   const activeId = hospitalId || process.env.HOSPITAL_ID || DAYA_HOSPITAL_CONFIG.hospitalId;
 
-  if (activeId === DAYA_HOSPITAL_CONFIG.hospitalId) {
-    return DAYA_HOSPITAL_CONFIG;
+  if (HOSPITAL_REGISTRY[activeId]) {
+    return HOSPITAL_REGISTRY[activeId];
   }
 
   // Fallback / default to Daya Hospital configuration
   return DAYA_HOSPITAL_CONFIG;
 }
 
+/**
+ * Normalizes phone numbers for matching (+91, 0, or clean digits).
+ */
+export function normalizePhoneNumber(num: string): string {
+  return num.replace(/\D/g, "").slice(-10);
+}
+
+/**
+ * Resolves hospital tenant from incoming/dialed phone number.
+ * Uses trusted server-side mapping, never relying on unverified client tenant IDs.
+ */
+export function resolveHospitalByPhoneNumber(phoneNumber: string): HospitalConfig | null {
+  if (!phoneNumber) return null;
+  const clean = normalizePhoneNumber(phoneNumber);
+
+  for (const config of Object.values(HOSPITAL_REGISTRY)) {
+    const mainClean = normalizePhoneNumber(config.telephony.incomingHospitalNumber);
+    const exoClean = config.telephony.exotel?.defaultExoPhone
+      ? normalizePhoneNumber(config.telephony.exotel.defaultExoPhone)
+      : "";
+    if (clean === mainClean || clean === exoClean) {
+      return config;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves hospital tenant by Exotel Account SID.
+ * Supports multi-account / subaccount arrangements per hospital.
+ */
+export function resolveHospitalByAccountSid(accountSid: string): HospitalConfig | null {
+  if (!accountSid) return null;
+
+  for (const config of Object.values(HOSPITAL_REGISTRY)) {
+    if (config.telephony.exotel?.accountSid === accountSid) {
+      return config;
+    }
+  }
+
+  return null;
+}
