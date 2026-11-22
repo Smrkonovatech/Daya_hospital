@@ -358,10 +358,18 @@ export class HospitalConversationEngine {
       }
     }
 
-    // Step 3: Confirmation
+    // Step 3: Confirmation (Explicit safety guard: AI must never falsely claim an appointment is booked or slot confirmed)
+    const isMockOrTest = Boolean(
+      this.hospitalConfig.telephony.status === "MOCK_SANDBOX" ||
+      process.env.AI_DEMO_MODE === "true" ||
+      process.env.NODE_ENV !== "production"
+    );
+    const replyText = isMockOrTest
+      ? "നന്ദി. ഇതൊരു പരീക്ഷണ കോളായതിനാൽ യഥാർത്ഥ അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്തിട്ടില്ല. ഡെമോൺസ്ട്രേഷനായി താങ്കളുടെ വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്."
+      : "നന്ദി. താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്. ഒപി വിഭാഗത്തിൽ നിന്ന് കൺഫർമേഷനായി ബന്ധപ്പെടുന്നതാണ്.";
+
     return {
-      replyText:
-        "നന്ദി. താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്. ഒപി വിഭാഗത്തിൽ നിന്ന് കൺഫർമേഷനായി ഉടൻ വിളിക്കുന്നതാണ്.",
+      replyText,
       intent: "APPOINTMENT",
       shouldTransfer: false,
       appointmentData: { ...this.collectedAppointment },

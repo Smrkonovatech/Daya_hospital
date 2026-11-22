@@ -585,13 +585,21 @@ export class CallMediaSession extends EventEmitter {
             error: res.error,
           };
           if (!res.success) {
+            const isConfirmed = Boolean(
+              this.hospitalConfig.telephony.status === "CONFIRMED" &&
+              process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true"
+            );
             const fallbackMsg =
               this.ivrContext?.currentLanguage === "en-IN"
-                ? `Emergency transfer failed. Please call our 24/7 Casualty desk directly at ${casualtyDestination}.`
-                : `കാഷ്വാലിറ്റിയിലേക്ക് ബന്ധിപ്പിക്കാൻ സാധിച്ചില്ല. ദയവായി ഈ നമ്പറിലേക്ക് നേരിട്ട് വിളിക്കുക: ${casualtyDestination}.`;
+                ? (isConfirmed
+                    ? `Emergency transfer failed. Please call our 24/7 Casualty desk directly at ${casualtyDestination}.`
+                    : `Emergency transfer is currently unavailable. Please proceed directly to the nearest hospital emergency department or dial emergency services immediately.`)
+                : (isConfirmed
+                    ? `കാഷ്വാലിറ്റിയിലേക്ക് ബന്ധിപ്പിക്കാൻ സാധിച്ചില്ല. ദയവായി ഈ നമ്പറിലേക്ക് നേരിട്ട് വിളിക്കുക: ${casualtyDestination}.`
+                    : `അടിയന്തിര ട്രാൻസ്ഫർ നിലവിൽ ലഭ്യമല്ല. ദയവായി തൊട്ടടുത്ത ആശുപത്രി അത്യാഹിത വിഭാഗത്തിൽ നേരിട്ടെത്തുക.`);
             const pcm = await this.ttsProvider.synthesize(fallbackMsg, {
               language: this.ivrContext?.currentLanguage || "ml-IN",
-              voiceId: "kavitha",
+              voiceId: this.ivrContext?.currentLanguage === "en-IN" ? "ratan" : "kavitha",
             });
             if (pcm && pcm.length > 0 && !this.isStopped) {
               await this.streamPcmAudio(pcm);
