@@ -535,4 +535,131 @@ describe("AgentStreamMediaGateway HTTP Server (Phase 3 & 12)", () => {
     const finalStatus = await (await fetch(`http://127.0.0.1:${testPort}/status`)).json();
     expect(finalStatus.activeSessions.length).toBe(0);
   });
+
+  it("handles WebSocket upgrades with trailing slashes, alternate paths, and query parameters", async () => {
+    // 1. Trailing slash /exotel/voicebot/
+    const wsTrailing = new WsClient(`ws://127.0.0.1:${testPort}/exotel/voicebot/`);
+    await new Promise<void>((r) => wsTrailing.on("open", () => r()));
+    expect(wsTrailing.readyState).toBe(1);
+    wsTrailing.close();
+
+    // 2. Alternate alias /exotel/agentstream
+    const wsAlias = new WsClient(`ws://127.0.0.1:${testPort}/exotel/agentstream`);
+    await new Promise<void>((r) => wsAlias.on("open", () => r()));
+    expect(wsAlias.readyState).toBe(1);
+    wsAlias.close();
+
+    // 3. Status endpoint exposes recent upgrades history
+    const status = await (await fetch(`http://127.0.0.1:${testPort}/status`)).json();
+    expect(status.recentUpgrades.length).toBeGreaterThanOrEqual(2);
+    expect(
+      status.recentUpgrades.some((u: { path: string }) => u.path.includes("/exotel/voicebot/"))
+    ).toBe(true);
+    expect(
+      status.recentUpgrades.some((u: { path: string }) => u.path.includes("/exotel/agentstream"))
+    ).toBe(true);
+  });
+
+  it("processes Exotel snake_case start event payload, sends dual-key stream_sid/streamSid, and reflects audio in echo mode", async () => {
+    // Connect with ?echo=true query param to activate echo mode
+    const ws = new WsClient(`ws://127.0.0.1:${testPort}/exotel/voicebot?echo=true`);
+    await new Promise<void>((r) => ws.on("open", () => r()));
+
+    const receivedMessages: Array<{
+      event: string;
+      streamSid?: string;
+      stream_sid?: string;
+      media?: { payload: string };
+    }> = [];
+    ws.on("message", (data) => {
+      try {
+        receivedMessages.push(JSON.parse(data.toString("utf8")));
+      } catch {}
+    });
+
+    // 1. Send pure Exotel snake_case start payload
+    ws.send(
+      JSON.stringify({
+        event: "start",
+        sequence_number: "1",
+        stream_sid: "MZ_exotel_snake_001",
+        start: {
+          stream_sid: "MZ_exotel_snake_001",
+          call_sid: "CA_exotel_snake_001",
+          account_sid: "smrkonova1",
+          from: "09606654032",
+          to: "08047291658",
+          media_format: {
+            encoding: "audio/x-l16",
+            sample_rate: 8000,
+            channels: 1,
+          },
+        },
+      })
+    );
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Session registered correctly from snake_case keys
+    const status = await (await fetch(`http://127.0.0.1:${testPort}/status`)).json();
+    expect(status.activeSessions.length).toBe(1);
+    expect(status.activeSessions[0].streamSid).toBe("MZ_exotel_snake_001");
+    expect(status.activeSessions[0].callSid).toBe("CA_exotel_snake_001");
+    expect(status.activeSessions[0].echoMode).toBe(true);
+
+    // 2. Send media chunk from caller
+    const testPcm = Buffer.alloc(640, 0x5a); // 2 frames of 320 bytes
+    const base64Audio = testPcm.toString("base64");
+
+    ws.send(
+      JSON.stringify({
+        event: "media",
+        sequence_number: "2",
+        stream_sid: "MZ_exotel_snake_001",
+        media: {
+          payload: base64Audio,
+          timestamp: "12345678",
+          chunk: "1",
+        },
+      })
+    );
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Verify outbound echo message was received
+    const mediaMessages = receivedMessages.filter((m) => m.event === "media");
+    expect(mediaMessages.length).toBeGreaterThanOrEqual(1);
+
+    const firstEcho = mediaMessages[0];
+    // Must contain both stream_sid and streamSid for compatibility
+    expect(firstEcho.stream_sid).toBe("MZ_exotel_snake_001");
+    expect(firstEcho.streamSid).toBe("MZ_exotel_snake_001");
+    expect(firstEcho.media).toBeDefined();
+    expect(firstEcho.media.payload).toBe(base64Audio);
+
+    // 3. Send stop event
+    ws.send(
+      JSON.stringify({
+        event: "stop",
+        stream_sid: "MZ_exotel_snake_001",
+        stop: {
+          call_sid: "CA_exotel_snake_001",
+        },
+      })
+    );
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Status should record completed call summary
+    const finalStatus = await (await fetch(`http://127.0.0.1:${testPort}/status`)).json();
+    expect(finalStatus.activeSessions.length).toBe(0);
+    expect(finalStatus.recentCompletedCalls.length).toBeGreaterThanOrEqual(1);
+    expect(
+      finalStatus.recentCompletedCalls.some(
+        (c: { streamSid: string }) => c.streamSid === "MZ_exotel_snake_001"
+      )
+    ).toBe(true);
+
+    ws.close();
+  });
 });

@@ -12,11 +12,7 @@
 import * as http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  ExotelIncomingMessage,
-  ExotelStartEvent,
-  ExotelMediaEvent,
-  ExotelDtmfEvent,
-  ExotelMarkEvent,
+  ExotelMediaFormat,
   MediaGatewayConfig,
 } from "./types";
 import { CallMediaSession, mediaSessionManager } from "./session-manager";
@@ -29,6 +25,26 @@ export class AgentStreamMediaGateway {
   private startTime: number = Date.now();
   private config: MediaGatewayConfig;
   private isShuttingDown = false;
+
+  // Diagnostics and live event ring buffers (capped to prevent memory growth)
+  private recentUpgrades: Array<{
+    timestamp: string;
+    clientIp: string;
+    path: string;
+    query: string;
+    userAgent: string;
+    upgraded: boolean;
+    error?: string;
+  }> = [];
+
+  private recentEvents: Array<{
+    timestamp: string;
+    event: string;
+    streamSid: string;
+    callSid: string;
+    byteCount?: number;
+    details?: string;
+  }> = [];
 
   constructor(options?: Partial<MediaGatewayConfig>) {
     this.config = {
@@ -43,9 +59,15 @@ export class AgentStreamMediaGateway {
       channels: options?.channels || 1,
       authSecret: options?.authSecret || process.env.VOICE_GATEWAY_AUTH_SECRET,
       enableDebugLogging: options?.enableDebugLogging ?? process.env.NODE_ENV !== "production",
+      echoMode:
+        options?.echoMode ??
+        (process.env.MEDIA_GATEWAY_ECHO_MODE === "true" ||
+          process.env.EXOTEL_ECHO_MODE === "true"),
+      autoPlayGreeting:
+        options?.autoPlayGreeting ?? process.env.GATEWAY_AUTO_PLAY_GREETING !== "false",
     };
 
-    // 1. Create native HTTP server with /health endpoint
+    // 1. Create native HTTP server with /health and /status endpoints
     this.server = http.createServer((req, res) => {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
@@ -69,11 +91,16 @@ export class AgentStreamMediaGateway {
         res.end(
           JSON.stringify({
             name: "Smrkomed Exotel Voicebot Media Gateway",
-            version: "1.0.0",
+            version: "1.1.0",
             status: "ONLINE",
             streamingPath: this.config.path,
+            echoMode: this.config.echoMode,
+            autoPlayGreeting: this.config.autoPlayGreeting,
             sarvamAi: getSarvamConfigSummary(),
             activeSessions: mediaSessionManager.getAllActiveSessions().map((s) => s.getSummary()),
+            recentCompletedCalls: mediaSessionManager.getRecentCompletedSessions(),
+            recentUpgrades: this.recentUpgrades.slice(-25),
+            recentEvents: this.recentEvents.slice(-35),
           })
         );
         return;
@@ -86,33 +113,71 @@ export class AgentStreamMediaGateway {
     // 2. Initialize WebSocket server attached to HTTP server
     this.wss = new WebSocketServer({ noServer: true });
 
-    // Handle HTTP upgrade requests for WebSocket
+    // Handle HTTP upgrade requests with robust path normalization & logging
     this.server.on("upgrade", (request, socket, head) => {
-      const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+      const clientIp =
+        (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        request.socket.remoteAddress ||
+        "unknown";
+      const userAgent = (request.headers["user-agent"] as string) || "unknown";
+      const host = request.headers.host || "localhost";
+      const url = new URL(request.url || "/", `http://${host}`);
+      const rawPath = url.pathname;
+      const normalizedPath = rawPath.replace(/\/+$/, "") || "/";
 
-      // Accept connections on configured path or aliases (/exotel/voicebot, /exotel/agentstream)
-      if (
-        url.pathname === this.config.path ||
-        url.pathname === "/exotel/voicebot" ||
-        url.pathname === "/exotel/agentstream"
-      ) {
-        // Optional secret token check if configured
-        if (this.config.authSecret) {
-          const authParam = url.searchParams.get("token") || request.headers["x-gateway-secret"];
-          if (authParam && authParam !== this.config.authSecret) {
-            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-            socket.destroy();
-            return;
-          }
+      // Accept configured path or any of the standard Exotel streaming aliases
+      const isMatchingPath =
+        normalizedPath === this.config.path ||
+        normalizedPath === "/exotel/voicebot" ||
+        normalizedPath === "/exotel/agentstream" ||
+        normalizedPath === "/voicebot" ||
+        normalizedPath === "/agentstream" ||
+        normalizedPath === "/stream" ||
+        normalizedPath === "/" ||
+        normalizedPath === "";
+
+      const recordUpgrade = (upgraded: boolean, error?: string) => {
+        const item = {
+          timestamp: new Date().toISOString(),
+          clientIp,
+          path: rawPath,
+          query: url.search,
+          userAgent,
+          upgraded,
+          error,
+        };
+        this.recentUpgrades.push(item);
+        if (this.recentUpgrades.length > 50) {
+          this.recentUpgrades.shift();
         }
+        console.log(
+          `[SMRKOMED Gateway] WebSocket upgrade ${upgraded ? "ACCEPTED" : "REJECTED"} for path "${rawPath}" from ${clientIp} (${error || "OK"})`
+        );
+      };
 
-        this.wss.handleUpgrade(request, socket, head, (ws) => {
-          this.wss.emit("connection", ws, request);
-        });
-      } else {
+      if (!isMatchingPath) {
+        recordUpgrade(false, "Path not matched");
         socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         socket.destroy();
+        return;
       }
+
+      // Optional secret token check if configured
+      if (this.config.authSecret) {
+        const authParam = url.searchParams.get("token") || request.headers["x-gateway-secret"];
+        if (authParam && authParam !== this.config.authSecret) {
+          recordUpgrade(false, "401 Unauthorized token");
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      }
+
+      recordUpgrade(true);
+      this.wss.handleUpgrade(request, socket, head, (ws) => {
+        (ws as unknown as { _requestUrl?: URL })._requestUrl = url;
+        this.wss.emit("connection", ws, request);
+      });
     });
 
     this.setupWebSocketHandlers();
@@ -128,71 +193,161 @@ export class AgentStreamMediaGateway {
         enforceMinimum: this.config.enforceMinimumChunk,
       });
 
+      const recordEvent = (
+        event: string,
+        streamSid: string,
+        callSid: string,
+        byteCount?: number,
+        details?: string
+      ) => {
+        this.recentEvents.push({
+          timestamp: new Date().toISOString(),
+          event,
+          streamSid,
+          callSid,
+          byteCount,
+          details,
+        });
+        if (this.recentEvents.length > 100) {
+          this.recentEvents.shift();
+        }
+      };
+
       ws.on("message", (data: Buffer | string) => {
         if (this.isShuttingDown) return;
 
-        let parsed: ExotelIncomingMessage;
+        let rawObj: Record<string, unknown>;
         try {
           const text = typeof data === "string" ? data : data.toString("utf-8");
-          parsed = JSON.parse(text);
+          rawObj = JSON.parse(text) as Record<string, unknown>;
         } catch {
           return;
         }
 
-        switch (parsed.event) {
+        const eventName = String(rawObj.event || "").toLowerCase();
+
+        switch (eventName) {
           case "connected": {
-            // Exotel connected event received
+            // Exotel initial connection event
+            const proto = String(rawObj.protocol || "Call");
+            const ver = String(rawObj.version || "1.0.0");
+            recordEvent("connected", "", "", undefined, `protocol=${proto} version=${ver}`);
             break;
           }
 
           case "start": {
-            const startMsg = parsed as ExotelStartEvent;
-            const meta = startMsg.start;
+            const meta = (rawObj.start || {}) as Record<string, unknown>;
+
+            // Support both snake_case (Exotel standard) and camelCase properties
+            const streamSid = String(
+              rawObj.stream_sid || rawObj.streamSid || meta.stream_sid || meta.streamSid || ""
+            );
+            const callSid = String(
+              meta.call_sid || meta.callSid || rawObj.call_sid || rawObj.callSid || ""
+            );
+            const accountSid = String(
+              meta.account_sid || meta.accountSid || rawObj.account_sid || rawObj.accountSid || ""
+            );
+            const from = String(meta.from || rawObj.from || "");
+            const to = String(meta.to || rawObj.to || "");
+            const customField = String(
+              meta.custom_field ||
+                meta.customField ||
+                rawObj.custom_field ||
+                rawObj.customField ||
+                (meta.custom_parameters ? JSON.stringify(meta.custom_parameters) : "")
+            );
+
+            const rawFormat = (meta.media_format || meta.mediaFormat || {}) as Record<string, unknown>;
+            const mediaFormat: ExotelMediaFormat = {
+              encoding: (rawFormat.encoding as ExotelMediaFormat["encoding"]) || "audio/x-l16",
+              sampleRate: Number(rawFormat.sample_rate || rawFormat.sampleRate || 8000),
+              channels: Number(rawFormat.channels || 1),
+            };
+
+            const wsUrl = (ws as unknown as { _requestUrl?: URL })._requestUrl;
+            const queryEcho = wsUrl?.searchParams.get("echo") === "true";
+            const sessionEchoMode = queryEcho || Boolean(this.config.echoMode);
 
             activeSession = new CallMediaSession({
-              streamSid: startMsg.streamSid || meta.streamSid,
-              callSid: meta.callSid,
-              accountSid: meta.accountSid,
-              from: meta.from,
-              to: meta.to,
-              customField: meta.customField,
-              mediaFormat: meta.mediaFormat,
+              streamSid,
+              callSid,
+              accountSid,
+              from,
+              to,
+              customField,
+              mediaFormat,
               socket: ws,
               audioEngine,
-              autoPlayGreeting: true,
+              autoPlayGreeting: this.config.autoPlayGreeting ?? true,
+              echoMode: sessionEchoMode,
             });
 
             mediaSessionManager.registerSession(activeSession);
             activeSession.markStarted();
+            recordEvent(
+              "start",
+              streamSid,
+              callSid,
+              undefined,
+              `from=${from} to=${to} echo=${sessionEchoMode}`
+            );
             break;
           }
 
           case "media": {
-            if (activeSession) {
-              const mediaMsg = parsed as ExotelMediaEvent;
-              activeSession.handleIncomingMedia(mediaMsg.media);
+            const mediaData = (rawObj.media || {}) as Record<string, unknown>;
+            const payload = String(mediaData.payload || mediaData.chunk || "");
+            const streamSid = String(
+              rawObj.stream_sid || rawObj.streamSid || activeSession?.streamSid || ""
+            );
+
+            if (activeSession && payload) {
+              activeSession.handleIncomingMedia({
+                payload,
+                timestamp: String(mediaData.timestamp || Date.now()),
+                chunk: String(mediaData.chunk || "0"),
+                track: mediaData.track as "inbound" | "outbound" | undefined,
+              });
+              recordEvent("media", streamSid, activeSession.callSid, payload.length);
             }
             break;
           }
 
           case "dtmf": {
-            if (activeSession) {
-              const dtmfMsg = parsed as ExotelDtmfEvent;
-              activeSession.handleDtmf(dtmfMsg.dtmf.digit);
+            const dtmfData = (rawObj.dtmf || {}) as Record<string, unknown>;
+            const digit = String(dtmfData.digit || dtmfData.key || "");
+            const streamSid = String(
+              rawObj.stream_sid || rawObj.streamSid || activeSession?.streamSid || ""
+            );
+
+            if (activeSession && digit) {
+              activeSession.handleDtmf(digit);
+              recordEvent("dtmf", streamSid, activeSession.callSid, undefined, `digit=${digit}`);
             }
             break;
           }
 
           case "mark": {
-            if (activeSession) {
-              const markMsg = parsed as ExotelMarkEvent;
-              activeSession.handleMark(markMsg.mark.name);
+            const markData = (rawObj.mark || {}) as Record<string, unknown>;
+            const name = String(markData.name || "");
+            const streamSid = String(
+              rawObj.stream_sid || rawObj.streamSid || activeSession?.streamSid || ""
+            );
+
+            if (activeSession && name) {
+              activeSession.handleMark(name);
+              recordEvent("mark", streamSid, activeSession.callSid, undefined, `name=${name}`);
             }
             break;
           }
 
           case "stop": {
+            const streamSid = String(
+              rawObj.stream_sid || rawObj.streamSid || activeSession?.streamSid || ""
+            );
             if (activeSession) {
+              recordEvent("stop", streamSid, activeSession.callSid);
               activeSession.close();
               activeSession = null;
             }

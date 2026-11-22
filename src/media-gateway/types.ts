@@ -120,10 +120,12 @@ export type ExotelIncomingMessage =
 
 /**
  * Outbound audio message sent to Exotel to be synthesized/played to caller.
+ * Includes both stream_sid (Exotel standard) and streamSid (camelCase compatibility).
  */
 export interface ExotelOutboundMediaMessage {
   event: "media";
   streamSid: string;
+  stream_sid?: string;
   media: {
     payload: string; // Base64 encoded PCM audio (multiple of 320 bytes, 3.2k - 100k)
   };
@@ -135,6 +137,7 @@ export interface ExotelOutboundMediaMessage {
 export interface ExotelOutboundMarkMessage {
   event: "mark";
   streamSid: string;
+  stream_sid?: string;
   mark: {
     name: string;
   };
@@ -146,6 +149,7 @@ export interface ExotelOutboundMarkMessage {
 export interface ExotelOutboundClearMessage {
   event: "clear";
   streamSid: string;
+  stream_sid?: string;
 }
 
 export type ExotelOutboundMessage =
@@ -177,5 +181,7 @@ export interface MediaGatewayConfig {
   channels: number; // default: 1 (mono)
   authSecret?: string;
   enableDebugLogging?: boolean;
+  echoMode?: boolean; // Diagnostic echo mode: echo caller voice back immediately
+  autoPlayGreeting?: boolean; // Auto-play Malayalam welcome greeting
 }
 

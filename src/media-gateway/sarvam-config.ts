@@ -46,10 +46,22 @@ export function maskSecret(secret?: string): string {
 }
 
 export function getSarvamConfig(overrides?: Partial<SarvamConfig>): SarvamConfig {
-  const apiKey = overrides?.apiKey || process.env.SARVAM_API_KEY || "";
-  const samvaadApiKey = overrides?.samvaadApiKey || process.env.SARVAM_SAMVAAD_API_KEY || "";
-  const orgId = overrides?.orgId || process.env.SARVAM_ORG_ID;
-  const workspaceId = overrides?.workspaceId || process.env.SARVAM_WORKSPACE_ID;
+  const apiKey =
+    overrides?.apiKey ||
+    process.env.SARVAM_API_KEY ||
+    "sk_l0nfgdq0_MRxkA28Stuh6JXP2AE4Anbcp";
+  const samvaadApiKey =
+    overrides?.samvaadApiKey ||
+    process.env.SARVAM_SAMVAAD_API_KEY ||
+    "sk_samvaad_xywpvl90_4qRfmMh1fcGrL9XcM48TdBbF";
+  const orgId =
+    overrides?.orgId ||
+    process.env.SARVAM_ORG_ID ||
+    "01a06777-00d4-7317-835c-507054052514";
+  const workspaceId =
+    overrides?.workspaceId ||
+    process.env.SARVAM_WORKSPACE_ID ||
+    "01a06777-00da-7f77-abe3-dc1fc871a5ab";
   const appId = overrides?.appId || process.env.SARVAM_APP_ID;
   const appVersion = overrides?.appVersion || process.env.SARVAM_APP_VERSION;
   const connectionId = overrides?.connectionId || process.env.SARVAM_CONNECTION_ID;

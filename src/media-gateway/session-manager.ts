@@ -45,6 +45,7 @@ export interface CallSessionInitOptions {
   conversationEngine?: HospitalConversationEngine;
   hospitalConfig?: HospitalConfig;
   autoPlayGreeting?: boolean;
+  echoMode?: boolean;
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -58,6 +59,7 @@ export class CallMediaSession extends EventEmitter {
   public readonly tenantResult: TenantResolutionResult;
   public readonly hospitalId: string;
   public readonly hospitalConfig: HospitalConfig;
+  public readonly echoMode: boolean;
 
   public state: SessionState = "INITIALIZING";
   public readonly createdAt: Date = new Date();
@@ -98,6 +100,10 @@ export class CallMediaSession extends EventEmitter {
     this.audioEngine = options.audioEngine || defaultAudioEngine;
     this.playbackQueue = new AudioPlaybackQueue(options.streamSid);
     this.autoPlayGreeting = options.autoPlayGreeting ?? false;
+    this.echoMode =
+      options.echoMode ??
+      (process.env.MEDIA_GATEWAY_ECHO_MODE === "true" ||
+        process.env.EXOTEL_ECHO_MODE === "true");
 
     this.mediaFormat = options.mediaFormat || {
       encoding: "audio/x-l16",
@@ -287,6 +293,11 @@ export class CallMediaSession extends EventEmitter {
     this.audioChunksReceived++;
     this.totalIncomingBytes += pcm.length;
 
+    // Diagnostic Echo Mode: if enabled, immediately reflect audio back to caller
+    if (this.echoMode) {
+      this.sendOutboundAudio(pcm);
+    }
+
     // Immediate caller barge-in detection: if caller speaks while bot is playing audio
     if (this.ttsStatus === "PLAYING" || this.playbackQueue.hasPending()) {
       const rms = this.calculateRms(pcm);
@@ -313,6 +324,7 @@ export class CallMediaSession extends EventEmitter {
 
   /**
    * Sends synthesized PCM audio back to Exotel to be heard by the caller.
+   * Includes both stream_sid (Exotel standard) and streamSid for maximum compatibility.
    */
   public sendOutboundAudio(pcmChunk: Buffer): boolean {
     if (this.state === "STOPPED" || this.socket.readyState !== 1) {
@@ -326,6 +338,7 @@ export class CallMediaSession extends EventEmitter {
     const msg: ExotelOutboundMediaMessage = {
       event: "media",
       streamSid: this.streamSid,
+      stream_sid: this.streamSid,
       media: {
         payload: base64Payload,
       },
@@ -349,6 +362,7 @@ export class CallMediaSession extends EventEmitter {
     const msg: ExotelOutboundMarkMessage = {
       event: "mark",
       streamSid: this.streamSid,
+      stream_sid: this.streamSid,
       mark: { name },
     };
 
@@ -371,6 +385,7 @@ export class CallMediaSession extends EventEmitter {
       const clearMsg: ExotelOutboundClearMessage = {
         event: "clear",
         streamSid: this.streamSid,
+        stream_sid: this.streamSid,
       };
       try {
         this.socket.send(JSON.stringify(clearMsg));
@@ -432,6 +447,7 @@ export class CallMediaSession extends EventEmitter {
       fromNumber: this.fromNumber,
       toNumber: this.toNumber,
       state: this.state,
+      echoMode: this.echoMode,
       durationSeconds: this.startedAt
         ? Math.round((Date.now() - this.startedAt.getTime()) / 1000)
         : 0,
@@ -449,9 +465,30 @@ export class CallMediaSession extends EventEmitter {
   }
 }
 
+export interface CompletedSessionSummary {
+  streamSid: string;
+  callSid: string;
+  hospitalId: string;
+  fromNumber: string;
+  toNumber: string;
+  state: string;
+  echoMode: boolean;
+  durationSeconds: number;
+  incomingBytes: number;
+  outgoingBytes: number;
+  chunksReceived: number;
+  turnCount: number;
+  lastCallerTranscript: string | null;
+  lastAiResponse: string | null;
+  startedAt: string;
+  stoppedAt: string;
+  timestamp: string;
+}
+
 export class MediaSessionManager extends EventEmitter {
   private sessionsByStream: Map<string, CallMediaSession> = new Map();
   private sessionsByCall: Map<string, CallMediaSession> = new Map();
+  private completedSessions: CompletedSessionSummary[] = [];
 
   public registerSession(session: CallMediaSession): void {
     this.sessionsByStream.set(session.streamSid, session);
@@ -460,6 +497,18 @@ export class MediaSessionManager extends EventEmitter {
     session.on("stopped", () => {
       this.sessionsByStream.delete(session.streamSid);
       this.sessionsByCall.delete(session.callSid);
+
+      const summary = session.getSummary();
+      this.completedSessions.push({
+        ...summary,
+        startedAt: session.startedAt?.toISOString() || new Date().toISOString(),
+        stoppedAt: session.stoppedAt?.toISOString() || new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+      });
+      if (this.completedSessions.length > 30) {
+        this.completedSessions.shift();
+      }
+
       this.emit("sessionClosed", session);
     });
 
@@ -480,6 +529,10 @@ export class MediaSessionManager extends EventEmitter {
 
   public getAllActiveSessions(): CallMediaSession[] {
     return Array.from(this.sessionsByStream.values());
+  }
+
+  public getRecentCompletedSessions(): CompletedSessionSummary[] {
+    return [...this.completedSessions];
   }
 
   public closeAll(): void {
