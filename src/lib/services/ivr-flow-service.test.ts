@@ -150,4 +150,55 @@ describe("IvrFlowService (Phase 4)", () => {
     expect(result.flow.exotelMapping?.appletId).toBe("1393239");
     expect(result.flow.exotelMapping?.lastVerificationStatus).toBe("VERIFIED");
   });
+
+  it("selects published flow for new calls, and active calls retain original version even when a new version is published concurrently", async () => {
+    const flowId = `flow_ver_lock_${Date.now()}`;
+    const flow = createDefaultHospitalFlow(hospitalId, "Version Locking Test Flow");
+    await ivrFlowService.saveDraft({
+      ...flow,
+      id: flowId,
+      hospitalId,
+      name: "Version Locking Flow",
+    });
+
+    // 1. Publish initial version (v2)
+    const pub1 = await ivrFlowService.publishFlow(flowId, hospitalId, "Release v2");
+    expect(pub1.success).toBe(true);
+    expect(pub1.versionNumber).toBe(2);
+
+    // 2. Active Call 1 arrives and locks to published v2
+    const currentFlowV2 = await ivrFlowService.getFlowById(flowId, hospitalId);
+    expect(currentFlowV2).toBeDefined();
+    expect(currentFlowV2?.currentVersion).toBe(2);
+    expect(currentFlowV2?.status).toBe("PUBLISHED");
+
+    // Call 1 execution context locks to v2
+    const activeCallContext = {
+      callSid: "CA_call_1_locked",
+      flowId: currentFlowV2!.id,
+      flowVersion: currentFlowV2!.currentVersion, // 2
+    };
+
+    // 3. Admin modifies draft and publishes version 3 concurrently while Call 1 is in progress
+    await ivrFlowService.saveDraft({
+      ...currentFlowV2!,
+      name: "Updated Flow v3",
+    });
+    const pub2 = await ivrFlowService.publishFlow(flowId, hospitalId, "Release v3");
+    expect(pub2.success).toBe(true);
+    expect(pub2.versionNumber).toBe(3);
+
+    // 4. Verify Call 1 context still has flowVersion = 2 (immutable snapshot lock)
+    expect(activeCallContext.flowVersion).toBe(2);
+
+    // 5. Verify a new Call 2 arriving now picks up published version 3
+    const currentFlowV3 = await ivrFlowService.getFlowById(flowId, hospitalId);
+    expect(currentFlowV3?.currentVersion).toBe(3);
+    const newCallContext = {
+      callSid: "CA_call_2_new",
+      flowId: currentFlowV3!.id,
+      flowVersion: currentFlowV3!.currentVersion, // 3
+    };
+    expect(newCallContext.flowVersion).toBe(3);
+  });
 });

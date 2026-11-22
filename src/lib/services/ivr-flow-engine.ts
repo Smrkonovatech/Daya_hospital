@@ -538,4 +538,35 @@ export class IvrFlowExecutionEngine {
 
     return "closed";
   }
+
+  /**
+   * Detects emergency / casualty keywords across Malayalam, English, and mixed speech.
+   */
+  public static detectEmergencyIntent(text: string): boolean {
+    if (!text) return false;
+    const lower = text.toLowerCase().trim();
+    const emergencyKeywords = [
+      "emergency",
+      "എമർജൻസി",
+      "accident",
+      "ആക്സിഡന്റ്",
+      "അപകടം",
+      "അടിയന്തിരം",
+      "അടിയന്തരം",
+      "നെഞ്ചുവേദന",
+      "ശ്വാസംമുട്ടൽ",
+      "അത്യാഹിതം",
+      "രക്തം",
+      "ആംബുലൻസ്",
+      "കാഷ്വാലിറ്റി",
+      "casualty",
+      "ambulance",
+      "icu",
+      "serious",
+      "urgent",
+      "heart attack",
+      "stroke",
+    ];
+    return emergencyKeywords.some((kw) => lower.includes(kw));
+  }
 }

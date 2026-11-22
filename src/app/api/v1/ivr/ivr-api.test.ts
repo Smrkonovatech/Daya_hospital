@@ -135,13 +135,25 @@ describe("IVR Flows REST APIs (Phase 4)", () => {
     expect(verJson.success).toBe(true);
     expect(Array.isArray(verJson.data)).toBe(true);
 
-    // Rollback to version 1
+    // Publish second version
+    const pubReq2 = new NextRequest(`http://localhost:3000/api/v1/ivr/flows/${targetFlow.id}/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hospitalId,
+        changelog: "Second publish version",
+      }),
+    });
+    const pubRes2 = await publishFlow(pubReq2, { params: Promise.resolve({ flowId: targetFlow.id }) });
+    expect(pubRes2.status).toBe(200);
+
+    // Rollback to first published version
     const rbReq = new NextRequest(`http://localhost:3000/api/v1/ivr/flows/${targetFlow.id}/rollback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         hospitalId,
-        targetVersion: 1,
+        targetVersion: pubJson.versionNumber,
       }),
     });
 

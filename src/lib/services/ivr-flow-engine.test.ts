@@ -215,4 +215,71 @@ describe("IvrFlowExecutionEngine (Phase 4)", () => {
     expect(step.isTerminal).toBe(true);
     expect(step.logMessage).toContain("maximum execution turn limit (50) exceeded");
   });
+
+  it("detects emergency intent across Malayalam, English, and Mixed language utterances", () => {
+    // Malayalam emergency phrases
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("അടിയന്തിരം ആണ് പെട്ടെന്ന് സഹായിക്കൂ")).toBe(true);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("നെഞ്ചുവേദന എടുക്കുന്നു")).toBe(true);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("ശ്വാസംമുട്ടൽ ഉണ്ട്")).toBe(true);
+
+    // English emergency phrases
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("This is an emergency, need doctor")).toBe(true);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("Severe accident, send ambulance")).toBe(true);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("Patient has chest pain and heart attack symptoms")).toBe(true);
+
+    // Mixed Malayalam + English phrases
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("Accident പറ്റി serious ആണ്")).toBe(true);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("Urgent കാഷ്വാലിറ്റി വേണം")).toBe(true);
+
+    // Non-emergency phrases
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("എനിക്ക് നാളെ ഡോക്ടറെ കാണാൻ സമയം വേണം")).toBe(false);
+    expect(IvrFlowExecutionEngine.detectEmergencyIntent("What are the OPD consultation hours?")).toBe(false);
+  });
+
+  it("handles emergency escalation outside business hours and overrides ordinary schedule", () => {
+    const context = IvrFlowExecutionEngine.initializeContext(
+      flow,
+      "CA_test_ivr_after_hours_em",
+      "+919847012345",
+      hospitalId,
+      "ml-IN"
+    );
+
+    // Call is currently at IVR Menu after-hours
+    const menuNode = flow.nodes.find((n) => n.type === "IVR_MENU")!;
+    context.currentNodeId = menuNode.id;
+
+    // Caller utters emergency or DTMF 1
+    const step = IvrFlowExecutionEngine.executeStep(flow, context, {
+      type: "EMERGENCY_DETECTED",
+      value: "അടിയന്തിരം ആണ്!",
+    });
+
+    expect(context.isEmergency).toBe(true);
+    expect(step.action).toBe("EMERGENCY_ESCALATE");
+    expect(step.transferDestination).toBe("0487 2475100");
+    expect(step.audioText).toContain("കാഷ്വാലിറ്റി");
+  });
+
+  it("handles human transfer failure and routes to fallback destination safely", () => {
+    const context = IvrFlowExecutionEngine.initializeContext(
+      flow,
+      "CA_test_ivr_transfer_fail",
+      "+919847012345",
+      hospitalId,
+      "ml-IN"
+    );
+
+    const transferNode = flow.nodes.find((n) => n.type === "HUMAN_TRANSFER")!;
+    context.currentNodeId = transferNode.id;
+
+    // Transfer failed event (e.g. agent busy or network failure)
+    const step = IvrFlowExecutionEngine.executeStep(flow, context, {
+      type: "TRANSFER_FAILED",
+      value: "Agent busy or no answer",
+    });
+
+    expect(step.action).toBe("TRANSFER_CALL");
+    expect(step.logMessage).toContain("failed. Executing fallback.");
+  });
 });
