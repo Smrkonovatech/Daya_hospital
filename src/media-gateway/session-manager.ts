@@ -26,6 +26,10 @@ import { SpeechToTextProvider, TextToSpeechProvider, TranscriptTurnResult } from
 import { SarvamSpeechToTextProvider } from "./sarvam-stt";
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { HospitalConversationEngine } from "./conversation-engine";
+import { IvrFlowExecutionEngine, StepInputEvent } from "@/lib/services/ivr-flow-engine";
+import { ivrFlowService, IvrFlowService } from "@/lib/services/ivr-flow-service";
+import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/lib/types/ivr-flow";
+import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
 
 export interface SocketSender {
   send(data: string, cb?: (err?: Error) => void): void;
@@ -50,6 +54,10 @@ export interface CallSessionInitOptions {
   echoMode?: boolean;
   silenceTimeoutMs?: number;
   ttsPace?: number;
+  ivrFlow?: IvrFlowData;
+  ivrVersion?: number;
+  ivrService?: IvrFlowService;
+  enableIvrFlow?: boolean;
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -91,6 +99,22 @@ export class CallMediaSession extends EventEmitter {
   public readonly ttsProvider: TextToSpeechProvider;
   public readonly conversationEngine: HospitalConversationEngine;
 
+  // Phase 4.1: Live IVR Flow Execution State
+  public ivrFlow?: IvrFlowData;
+  public ivrVersion?: number;
+  public ivrContext?: FlowExecutionContext;
+  public isExecutingIvrFlow = false;
+  public waitingForDtmf = false;
+  public expectedDigits = 1;
+  public collectedDtmfBuffer = "";
+  public lastStepResult?: FlowExecutionStepResult;
+  public enableIvrFlow = true;
+
+  private dtmfTimeoutTimer?: NodeJS.Timeout;
+  private isExecutingStep = false;
+  private executionSessionId?: string;
+  private ivrService: IvrFlowService;
+
   private socket: SocketSender;
   private audioEngine: AudioEngine;
   private playbackQueue: AudioPlaybackQueue;
@@ -107,11 +131,14 @@ export class CallMediaSession extends EventEmitter {
     this.socket = options.socket;
     this.audioEngine = options.audioEngine || defaultAudioEngine;
     this.playbackQueue = new AudioPlaybackQueue(options.streamSid);
-    this.autoPlayGreeting = options.autoPlayGreeting ?? false;
     this.echoMode =
       options.echoMode ??
       (process.env.MEDIA_GATEWAY_ECHO_MODE === "true" ||
         process.env.EXOTEL_ECHO_MODE === "true");
+
+    this.autoPlayGreeting = options.autoPlayGreeting ?? false;
+    this.enableIvrFlow = options.enableIvrFlow ?? Boolean(options.ivrFlow);
+    this.ivrService = options.ivrService || ivrFlowService;
 
     this.mediaFormat = options.mediaFormat || {
       encoding: "audio/x-l16",
@@ -130,6 +157,19 @@ export class CallMediaSession extends EventEmitter {
     });
     this.hospitalId = this.tenantResult.hospitalId;
     this.hospitalConfig = options.hospitalConfig || getHospitalConfig(this.hospitalId);
+
+    if (options.ivrFlow) {
+      this.ivrFlow = options.ivrFlow;
+      this.ivrVersion = options.ivrVersion || options.ivrFlow.currentVersion;
+      this.isExecutingIvrFlow = true;
+      this.ivrContext = IvrFlowExecutionEngine.initializeContext(
+        this.ivrFlow,
+        this.callSid,
+        this.fromNumber,
+        this.hospitalId,
+        "ml-IN"
+      );
+    }
 
     // AI Components Initialization with low-latency VAD (400ms) & brisk Malayalam TTS pace (1.15)
     this.conversationEngine =
@@ -160,13 +200,38 @@ export class CallMediaSession extends EventEmitter {
       this.emit("transcript", turn);
 
       if (turn.isFinal && turn.text.trim()) {
+        const text = turn.text.trim();
         this.conversationTurns.push({
           speaker: "caller",
-          text: turn.text.trim(),
+          text,
           timestampMs: turn.timestampMs,
         });
 
-        await this.handleUserTurn(turn.text.trim(), turn);
+        // 1. Emergency intent check across speech turns (Malayalam, English, and mixed)
+        if (IvrFlowExecutionEngine.detectEmergencyIntent(text)) {
+          console.log(`[CallSession ${this.callSid}] Emergency keyword detected in caller utterance: "${text}"`);
+          if (this.isExecutingIvrFlow) {
+            await this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: text });
+            return;
+          }
+        }
+
+        // 2. If waiting for DTMF, check for spoken digits as accessibility fallback
+        if (this.isExecutingIvrFlow && this.waitingForDtmf) {
+          const lower = text.toLowerCase();
+          let recognizedDigit: string | undefined;
+          if (lower.includes("ഒന്ന്") || lower.includes("one") || lower.includes("1")) recognizedDigit = "1";
+          else if (lower.includes("രണ്ട്") || lower.includes("two") || lower.includes("2")) recognizedDigit = "2";
+          else if (lower.includes("മൂന്ന്") || lower.includes("three") || lower.includes("3")) recognizedDigit = "3";
+          else if (lower.includes("നാല്") || lower.includes("four") || lower.includes("4")) recognizedDigit = "4";
+
+          if (recognizedDigit) {
+            this.handleDtmf(recognizedDigit);
+            return;
+          }
+        }
+
+        await this.handleUserTurn(text, turn);
       }
     });
 
@@ -194,7 +259,14 @@ export class CallMediaSession extends EventEmitter {
 
     this.emit("started", { streamSid: this.streamSid, callSid: this.callSid });
 
-    if (this.autoPlayGreeting) {
+    if (this.enableIvrFlow) {
+      this.initiateCallSession().catch((err) => {
+        console.error(`[CallSession ${this.callSid}] IVR initialization error:`, err);
+        if (this.autoPlayGreeting) {
+          this.playInitialGreeting().catch(() => {});
+        }
+      });
+    } else if (this.autoPlayGreeting) {
       this.playInitialGreeting().catch(() => {});
     }
   }
@@ -205,6 +277,362 @@ export class CallMediaSession extends EventEmitter {
 
   public get isInterrupted(): boolean {
     return (this.ttsStatus as string) === "INTERRUPTED";
+  }
+
+  /**
+   * Resolves the hospital's published IVR flow and initializes turn-by-turn execution.
+   * If no published flow exists for this hospital, safely falls back to direct conversational AI.
+   */
+  public async initiateCallSession(): Promise<void> {
+    if (this.isStopped) return;
+
+    if (!this.ivrFlow) {
+      const published = await this.ivrService.getActivePublishedFlow(
+        this.hospitalId,
+        this.tenantResult.hospitalConfig.telephony.exotel?.defaultAppId
+      );
+
+      if (published && published.flow) {
+        this.isExecutingIvrFlow = true;
+        this.ivrFlow = published.flow;
+        this.ivrVersion = published.version.versionNumber;
+        this.ivrContext = IvrFlowExecutionEngine.initializeContext(
+          published.flow,
+          this.callSid,
+          this.fromNumber,
+          this.hospitalId,
+          "ml-IN"
+        );
+      }
+    } else {
+      this.isExecutingIvrFlow = true;
+      this.ivrVersion = this.ivrVersion || this.ivrFlow.currentVersion;
+      this.ivrContext = IvrFlowExecutionEngine.initializeContext(
+        this.ivrFlow,
+        this.callSid,
+        this.fromNumber,
+        this.hospitalId,
+        "ml-IN"
+      );
+    }
+
+    if (this.isExecutingIvrFlow && this.ivrFlow && this.ivrContext) {
+      console.log(
+        `[CallSession ${this.callSid}] Locked to published IVR flow '${this.ivrFlow.name}' (v${this.ivrVersion}) for tenant '${this.hospitalId}'.`
+      );
+      await this.executeIvrStep({ type: "START_CALL" });
+    } else {
+      this.isExecutingIvrFlow = false;
+      console.log(
+        `[CallSession ${this.callSid}] No published IVR flow found for tenant '${this.hospitalId}'. Executing direct AI conversation fallback.`
+      );
+      if (this.autoPlayGreeting) {
+        await this.playInitialGreeting();
+      }
+    }
+  }
+
+  /**
+   * Executes a step in the active IVR flow graph.
+   */
+  public async executeIvrStep(input: StepInputEvent): Promise<FlowExecutionStepResult | null> {
+    if (!this.ivrFlow || !this.ivrContext || this.isStopped) return null;
+
+    if (this.isExecutingStep) {
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    this.isExecutingStep = true;
+
+    try {
+      const stepResult = IvrFlowExecutionEngine.executeStep(
+        this.ivrFlow,
+        this.ivrContext,
+        input,
+        new Date()
+      );
+
+      this.lastStepResult = stepResult;
+      this.emit("ivrStep", {
+        callSid: this.callSid,
+        action: stepResult.action,
+        nodeId: this.ivrContext.currentNodeId,
+        logMessage: stepResult.logMessage,
+      });
+
+      this.persistExecutionState(stepResult).catch(() => {});
+      await this.processIvrAction(stepResult);
+      return stepResult;
+    } catch (err) {
+      console.error(`[CallSession ${this.callSid}] IVR step execution error:`, err);
+      return null;
+    } finally {
+      this.isExecutingStep = false;
+    }
+  }
+
+  /**
+   * Processes the telephony action returned by the IVR execution engine.
+   */
+  public async processIvrAction(stepResult: FlowExecutionStepResult): Promise<void> {
+    if (this.isStopped) return;
+
+    switch (stepResult.action) {
+      case "PLAY_AUDIO": {
+        this.waitingForDtmf = false;
+        if (stepResult.audioText) {
+          this.conversationTurns.push({
+            speaker: "ai",
+            text: stepResult.audioText,
+            timestampMs: Date.now(),
+          });
+          const lang = stepResult.audioLanguage || this.ivrContext?.currentLanguage || "ml-IN";
+          const voiceId = stepResult.ttsSpeaker || (lang === "en-IN" ? "ratan" : "kavitha");
+          this.ttsStatus = "SYNTHESIZING";
+          try {
+            const pcm = await this.ttsProvider.synthesize(stepResult.audioText, {
+              language: lang,
+              voiceId,
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch (err) {
+            console.warn(`[CallSession ${this.callSid}] Audio synthesis error:`, err);
+          } finally {
+            this.ttsStatus = "IDLE";
+          }
+        }
+
+        // Auto-advance if nextNodeId exists and current node is not terminal
+        if (stepResult.nextNodeId && !stepResult.isTerminal && !this.isStopped) {
+          await this.executeIvrStep({ type: "START_CALL" });
+        }
+        break;
+      }
+
+      case "COLLECT_DTMF": {
+        if (stepResult.dtmfPrompt) {
+          this.conversationTurns.push({
+            speaker: "ai",
+            text: stepResult.dtmfPrompt,
+            timestampMs: Date.now(),
+          });
+          const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          const voiceId = lang === "en-IN" ? "ratan" : "kavitha";
+          this.ttsStatus = "SYNTHESIZING";
+          try {
+            const pcm = await this.ttsProvider.synthesize(stepResult.dtmfPrompt, {
+              language: lang,
+              voiceId,
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch (err) {
+            console.warn(`[CallSession ${this.callSid}] DTMF prompt synthesis error:`, err);
+          } finally {
+            this.ttsStatus = "IDLE";
+          }
+        }
+
+        if (this.isStopped) return;
+
+        this.waitingForDtmf = true;
+        this.expectedDigits = stepResult.dtmfExpectedDigits || 1;
+        this.collectedDtmfBuffer = "";
+
+        if (this.dtmfTimeoutTimer) {
+          clearTimeout(this.dtmfTimeoutTimer);
+        }
+
+        this.dtmfTimeoutTimer = setTimeout(async () => {
+          if (this.waitingForDtmf && !this.isStopped) {
+            console.log(`[CallSession ${this.callSid}] DTMF input timeout triggered.`);
+            this.waitingForDtmf = false;
+            await this.executeIvrStep({ type: "TIMEOUT" });
+          }
+        }, 7000);
+        break;
+      }
+
+      case "STREAM_AI_AGENT": {
+        this.waitingForDtmf = false;
+        if (this.dtmfTimeoutTimer) {
+          clearTimeout(this.dtmfTimeoutTimer);
+          this.dtmfTimeoutTimer = undefined;
+        }
+
+        console.log(
+          `[CallSession ${this.callSid}] Entering AI Voice Agent node '${stepResult.aiAgentConfig?.agentName || "Hospital AI Receptionist"}'`
+        );
+        break;
+      }
+
+      case "TRANSFER_CALL": {
+        this.waitingForDtmf = false;
+        if (this.dtmfTimeoutTimer) {
+          clearTimeout(this.dtmfTimeoutTimer);
+          this.dtmfTimeoutTimer = undefined;
+        }
+
+        const destination =
+          stepResult.transferDestination ||
+          this.hospitalConfig.telephony.incomingHospitalNumber ||
+          "+91 96066 54032";
+
+        if (stepResult.audioText) {
+          this.conversationTurns.push({
+            speaker: "ai",
+            text: stepResult.audioText,
+            timestampMs: Date.now(),
+          });
+          const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          try {
+            const pcm = await this.ttsProvider.synthesize(stepResult.audioText, {
+              language: lang,
+              voiceId: lang === "en-IN" ? "ratan" : "kavitha",
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch {}
+        }
+
+        console.log(
+          `[CallSession ${this.callSid}] Initiating call transfer to ${destination} via ExotelTelephonyService`
+        );
+
+        try {
+          const res = await exotelTelephonyService.transferCall(
+            this.callSid,
+            destination,
+            this.hospitalId
+          );
+          if (!res.success) {
+            console.warn(
+              `[CallSession ${this.callSid}] Exotel transfer failed: ${res.error}. Routing to fallback.`
+            );
+            await this.executeIvrStep({ type: "TRANSFER_FAILED", value: res.error || "Transfer failed" });
+          } else {
+            this.state = "STOPPED";
+          }
+        } catch (err) {
+          console.error(`[CallSession ${this.callSid}] Exotel transfer exception:`, err);
+          await this.executeIvrStep({ type: "TRANSFER_FAILED", value: "Transfer exception" });
+        }
+        break;
+      }
+
+      case "EMERGENCY_ESCALATE": {
+        this.waitingForDtmf = false;
+        if (this.dtmfTimeoutTimer) {
+          clearTimeout(this.dtmfTimeoutTimer);
+          this.dtmfTimeoutTimer = undefined;
+        }
+
+        this.interruptPlayback();
+
+        const casualtyDestination =
+          this.hospitalConfig.routing.casualtyDirectNumber ||
+          stepResult.transferDestination ||
+          "0487 2475100";
+
+        console.log(
+          `[CallSession ${this.callSid}] [EMERGENCY PROTOCOL] Fast-tracking call to Casualty (${casualtyDestination})`
+        );
+
+        if (stepResult.audioText) {
+          this.conversationTurns.push({
+            speaker: "ai",
+            text: stepResult.audioText,
+            timestampMs: Date.now(),
+          });
+          const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          try {
+            const pcm = await this.ttsProvider.synthesize(stepResult.audioText, {
+              language: lang,
+              voiceId: lang === "en-IN" ? "ratan" : "kavitha",
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch {}
+        }
+
+        try {
+          const res = await exotelTelephonyService.transferCall(
+            this.callSid,
+            casualtyDestination,
+            this.hospitalId
+          );
+          if (!res.success) {
+            const fallbackMsg =
+              this.ivrContext?.currentLanguage === "en-IN"
+                ? `Emergency transfer failed. Please call our 24/7 Casualty desk directly at ${casualtyDestination}.`
+                : `കാഷ്വാലിറ്റിയിലേക്ക് ബന്ധിപ്പിക്കാൻ സാധിച്ചില്ല. ദയവായി ഈ നമ്പറിലേക്ക് നേരിട്ട് വിളിക്കുക: ${casualtyDestination}.`;
+            const pcm = await this.ttsProvider.synthesize(fallbackMsg, {
+              language: this.ivrContext?.currentLanguage || "ml-IN",
+              voiceId: "kavitha",
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          }
+        } catch {
+          // Fallback instructions
+        }
+        break;
+      }
+
+      case "HANGUP": {
+        this.waitingForDtmf = false;
+        if (this.dtmfTimeoutTimer) {
+          clearTimeout(this.dtmfTimeoutTimer);
+          this.dtmfTimeoutTimer = undefined;
+        }
+
+        if (stepResult.audioText) {
+          this.conversationTurns.push({
+            speaker: "ai",
+            text: stepResult.audioText,
+            timestampMs: Date.now(),
+          });
+          const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          try {
+            const pcm = await this.ttsProvider.synthesize(stepResult.audioText, {
+              language: lang,
+              voiceId: lang === "en-IN" ? "ratan" : "kavitha",
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch {}
+        }
+
+        this.close();
+        break;
+      }
+    }
+  }
+
+  private async persistExecutionState(stepResult?: FlowExecutionStepResult, finalStatus?: string): Promise<void> {
+    if (!this.ivrFlow || !this.ivrContext) return;
+    try {
+      this.executionSessionId = await this.ivrService.persistExecutionSession({
+        sessionId: this.executionSessionId,
+        flowId: this.ivrFlow.id,
+        versionNumber: this.ivrVersion || this.ivrFlow.currentVersion,
+        callSid: this.callSid,
+        callerNumber: this.fromNumber,
+        hospitalId: this.hospitalId,
+        currentNodeId: this.ivrContext.currentNodeId,
+        variables: this.ivrContext.variables,
+        status: finalStatus || (this.isStopped ? "COMPLETED" : "ACTIVE"),
+        executionLog: this.ivrContext.history,
+      });
+    } catch {
+      // Non-blocking
+    }
   }
 
   /**
@@ -264,6 +692,14 @@ export class CallMediaSession extends EventEmitter {
         llmFirstTokenMs = Date.now();
       }
     });
+
+    if (this.isExecutingIvrFlow && result.shouldTransfer) {
+      console.log(
+        `[CallSession ${this.callSid}] AI conversation requested staff handoff (intent=${result.intent}). Routing to IVR handoff.`
+      );
+      await this.executeIvrStep({ type: "AI_HANDOFF", value: text });
+      return;
+    }
 
     llmFirstTokenMs = result.llmTimestamps?.llmFirstTokenMs || llmFirstTokenMs || Date.now();
     const llmResponseReadyMs = result.llmTimestamps?.llmResponseReadyMs || Date.now();
@@ -503,6 +939,30 @@ export class CallMediaSession extends EventEmitter {
   public handleDtmf(digit: string): void {
     this.dtmfDigits.push(digit);
     this.emit("dtmf", { streamSid: this.streamSid, digit });
+
+    if (this.isExecutingIvrFlow && this.waitingForDtmf) {
+      if (this.dtmfTimeoutTimer) {
+        clearTimeout(this.dtmfTimeoutTimer);
+        this.dtmfTimeoutTimer = undefined;
+      }
+
+      if (this.expectedDigits > 1) {
+        this.collectedDtmfBuffer += digit;
+        if (digit === "#" || this.collectedDtmfBuffer.length >= this.expectedDigits) {
+          const finalDigits = this.collectedDtmfBuffer.replace(/#/g, "");
+          this.collectedDtmfBuffer = "";
+          this.waitingForDtmf = false;
+          this.executeIvrStep({ type: "DTMF_DIGITS", value: finalDigits }).catch((err) => {
+            console.error(`[CallSession ${this.callSid}] DTMF digits processing error:`, err);
+          });
+        }
+      } else {
+        this.waitingForDtmf = false;
+        this.executeIvrStep({ type: "DTMF_KEY", value: digit }).catch((err) => {
+          console.error(`[CallSession ${this.callSid}] DTMF key processing error:`, err);
+        });
+      }
+    }
   }
 
   public handleMark(name: string): void {
@@ -511,11 +971,20 @@ export class CallMediaSession extends EventEmitter {
   }
 
   public close(): void {
+    if (this.dtmfTimeoutTimer) {
+      clearTimeout(this.dtmfTimeoutTimer);
+      this.dtmfTimeoutTimer = undefined;
+    }
+    this.waitingForDtmf = false;
     this.state = "STOPPED";
     this.stoppedAt = new Date();
     this.ttsStatus = "IDLE";
     this.sttStatus = "IDLE";
     this.playbackQueue.clear();
+
+    if (this.isExecutingIvrFlow && this.ivrContext) {
+      this.persistExecutionState(undefined, "COMPLETED").catch(() => {});
+    }
 
     if (this.sttProvider) {
       this.sttProvider.close().catch(() => {});
@@ -557,7 +1026,7 @@ export class CallMediaSession extends EventEmitter {
       outgoingBytes: this.totalOutgoingBytes,
       chunksReceived: this.audioChunksReceived,
       dtmfCount: this.dtmfDigits.length,
-      detectedLanguage: "ml-IN",
+      detectedLanguage: this.ivrContext?.currentLanguage || "ml-IN",
       sttStatus: this.sttStatus,
       ttsStatus: this.ttsStatus,
       lastCallerTranscript: this.lastCallerTranscript || null,
@@ -567,6 +1036,15 @@ export class CallMediaSession extends EventEmitter {
       lastTurnLatencyMs:
         this.turnLatencyMetrics[this.turnLatencyMetrics.length - 1]?.latencies
           .totalSpeechEndToAudibleResponseMs ?? null,
+      ivrRuntime: {
+        isExecutingIvrFlow: this.isExecutingIvrFlow,
+        flowId: this.ivrFlow?.id || null,
+        flowName: this.ivrFlow?.name || null,
+        flowVersion: this.ivrVersion || null,
+        currentNodeId: this.ivrContext?.currentNodeId || null,
+        isEmergency: this.ivrContext?.isEmergency || false,
+        language: this.ivrContext?.currentLanguage || "ml-IN",
+      },
     };
   }
 }
@@ -591,6 +1069,15 @@ export interface CompletedSessionSummary {
   timestamp: string;
   averageTurnLatencyMs?: number | null;
   turnLatencyMetrics?: TurnLatencyMetrics[];
+  ivrRuntime?: {
+    isExecutingIvrFlow: boolean;
+    flowId: string | null;
+    flowName: string | null;
+    flowVersion: number | null;
+    currentNodeId: string | null;
+    isEmergency: boolean;
+    language: string;
+  };
 }
 
 export class MediaSessionManager extends EventEmitter {

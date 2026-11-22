@@ -29,6 +29,7 @@ import {
   InvalidInputNodeData,
   RepeatMenuNodeData,
   EndCallNodeData,
+  QueueWaitingNodeData,
 } from "@/lib/types/ivr-flow";
 
 export interface StepInputEvent {
@@ -452,6 +453,27 @@ export class IvrFlowExecutionEngine {
         actionResult = "HANGUP";
         isTerminal = true;
         logMessage = `Call ended gracefully. Closing message: "${audioText}"`;
+        break;
+      }
+
+      case "QUEUE_WAITING": {
+        const qData = currentNode.data as unknown as QueueWaitingNodeData;
+        actionResult = "PLAY_AUDIO";
+        audioText =
+          context.currentLanguage === "en-IN"
+            ? "Automated queue distribution is not active. Connecting you to hospital reception."
+            : "ഓട്ടോമേറ്റഡ് ക്യൂ സേവനം നിലവിൽ ലഭ്യമല്ല. നിങ്ങളെ ഹോസ്പിറ്റൽ റിസപ്ഷനിലേക്ക് ബന്ധിപ്പിക്കുന്നു.";
+        
+        // Find next edge or fallback to human transfer/reception
+        const edge = flow.edges.find(
+          (e) =>
+            e.sourceNodeId === currentNode.id &&
+            (e.sourcePortId === "agent_answered" ||
+              e.sourcePortId === "queue_timeout" ||
+              e.sourcePortId === "next")
+        );
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `[QUEUE_UNSUPPORTED] Telephony queue '${qData.queueName || "General"}' not provisioned. Initiating controlled staff handoff. Next: ${nextNodeId || "Reception"}`;
         break;
       }
 

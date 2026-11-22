@@ -99,7 +99,7 @@ export class AgentStreamMediaGateway {
         res.end(
           JSON.stringify({
             name: "Smrkomed Exotel Voicebot Media Gateway",
-            version: "1.2.0",
+            version: "1.3.0",
             status: "ONLINE",
             streamingPath: this.config.path,
             echoMode: this.config.echoMode,
@@ -107,6 +107,14 @@ export class AgentStreamMediaGateway {
             silenceTimeoutMs: this.config.silenceTimeoutMs,
             ttsPace: this.config.ttsPace,
             sarvamAi: getSarvamConfigSummary(),
+            ivrRuntime: {
+              activeIvrSessions: mediaSessionManager
+                .getAllActiveSessions()
+                .filter((s) => s.isExecutingIvrFlow).length,
+              activeDirectAiFallbackSessions: mediaSessionManager
+                .getAllActiveSessions()
+                .filter((s) => !s.isExecutingIvrFlow).length,
+            },
             latencyTelemetry: {
               aggregates: mediaSessionManager.getAggregateLatencyStats(),
               recentTurnMetrics: mediaSessionManager.getRecentTurnMetrics(
@@ -261,6 +269,18 @@ export class AgentStreamMediaGateway {
             const callSid = String(
               meta.call_sid || meta.callSid || rawObj.call_sid || rawObj.callSid || ""
             );
+
+            // Idempotency check: guard against duplicate start events for the same stream or call
+            const existingSession =
+              mediaSessionManager.getSessionByStream(streamSid) ||
+              (callSid ? mediaSessionManager.getSessionByCallSid(callSid) : undefined);
+
+            if (existingSession) {
+              console.log(
+                `[SMRKOMED Gateway] Idempotent ignore: active session already exists for stream "${streamSid}" / call "${callSid}"`
+              );
+              break;
+            }
             const accountSid = String(
               meta.account_sid || meta.accountSid || rawObj.account_sid || rawObj.accountSid || ""
             );
@@ -300,6 +320,7 @@ export class AgentStreamMediaGateway {
               audioEngine,
               autoPlayGreeting: sessionAutoGreeting,
               echoMode: sessionEchoMode,
+              enableIvrFlow: !sessionEchoMode,
               silenceTimeoutMs: this.config.silenceTimeoutMs,
               ttsPace: this.config.ttsPace,
             });

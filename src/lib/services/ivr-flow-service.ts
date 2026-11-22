@@ -26,6 +26,7 @@ import { createDefaultHospitalFlow } from "./ivr-node-definitions";
 // Fast in-memory storage fallback for unit testing and local sandboxes
 const inMemoryFlows = new Map<string, IvrFlowData>();
 const inMemoryVersions = new Map<string, IvrFlowVersionData[]>();
+const inMemoryExecutionSessions = new Map<string, unknown>();
 
 export class IvrFlowService {
   /**
@@ -63,7 +64,195 @@ export class IvrFlowService {
     );
 
     inMemoryFlows.set(defaultFlow.id, defaultFlow);
+
+    if (!inMemoryVersions.has(defaultFlow.id)) {
+      inMemoryVersions.set(defaultFlow.id, [
+        {
+          id: `ver_${defaultFlow.id}_1`,
+          flowId: defaultFlow.id,
+          versionNumber: 1,
+          status: "PUBLISHED",
+          deploymentStatus: defaultFlow.deploymentStatus,
+          changelog: "Default hospital IVR flow template",
+          snapshot: {
+            name: defaultFlow.name,
+            description: defaultFlow.description,
+            nodes: [...defaultFlow.nodes],
+            edges: [...defaultFlow.edges],
+            variables: { ...defaultFlow.variables },
+            exotelMapping: defaultFlow.exotelMapping,
+          },
+          publishedBy: "System Administrator",
+          publishedAt: defaultFlow.createdAt,
+        },
+      ]);
+    }
+
     return [defaultFlow];
+  }
+
+  /**
+   * Resolves the active published IVR flow for a hospital tenant.
+   * Guarantees strict tenant isolation: will NEVER load another hospital's flow.
+   * Returns null if no published flow exists for this hospital.
+   */
+  public async getActivePublishedFlow(
+    hospitalId: string,
+    exotelAppletId?: string
+  ): Promise<{ flow: IvrFlowData; version: IvrFlowVersionData } | null> {
+    if (!hospitalId) return null;
+
+    // 1. Check DB first if connected
+    const dbStatus = await checkDatabaseConnection();
+    let publishedFlows: IvrFlowData[] = [];
+
+    if (dbStatus.connected) {
+      try {
+        const records = await prisma.ivrFlow.findMany({
+          where: { hospitalId, status: "PUBLISHED" },
+          orderBy: { updatedAt: "desc" },
+        });
+        if (records.length > 0) {
+          publishedFlows = records.map((r) => this.mapDbRecordToFlow(r));
+        }
+      } catch {}
+    }
+
+    // 2. Check in-memory flows strictly for this hospitalId
+    if (publishedFlows.length === 0) {
+      publishedFlows = Array.from(inMemoryFlows.values()).filter(
+        (f) => f.hospitalId === hospitalId && f.status === "PUBLISHED"
+      );
+    }
+
+    // 3. For primary Daya pilot tenant, seed default published flow if not yet created
+    if (publishedFlows.length === 0 && hospitalId === "hosp_daya_thrissur") {
+      const defaultFlows = await this.getFlowsByHospital(hospitalId);
+      publishedFlows = defaultFlows.filter((f) => f.status === "PUBLISHED");
+    }
+
+    if (publishedFlows.length === 0) {
+      return null;
+    }
+
+    // 2. Select matching flow: prefer Exotel Applet ID match, else default flow, else first published
+    let selectedFlow = exotelAppletId
+      ? publishedFlows.find((f) => f.exotelMapping?.appletId === exotelAppletId)
+      : undefined;
+
+    if (!selectedFlow) {
+      selectedFlow = publishedFlows.find((f) => f.isDefault) || publishedFlows[0];
+    }
+
+    // 3. Fetch immutable version snapshot
+    const versions = await this.getFlowVersions(selectedFlow.id, hospitalId);
+    let version = versions.find((v) => v.versionNumber === selectedFlow!.currentVersion);
+    if (!version && versions.length > 0) {
+      version = versions[0];
+    }
+
+    if (!version) {
+      // Create version 1 snapshot on the fly if needed
+      version = {
+        id: `ver_${selectedFlow.id}_${selectedFlow.currentVersion}`,
+        flowId: selectedFlow.id,
+        versionNumber: selectedFlow.currentVersion,
+        status: "PUBLISHED",
+        deploymentStatus: selectedFlow.deploymentStatus,
+        changelog: "Published hospital call flow",
+        snapshot: {
+          name: selectedFlow.name,
+          description: selectedFlow.description,
+          nodes: [...selectedFlow.nodes],
+          edges: [...selectedFlow.edges],
+          variables: { ...selectedFlow.variables },
+          exotelMapping: selectedFlow.exotelMapping,
+        },
+        publishedBy: selectedFlow.lastUpdatedBy || "System",
+        publishedAt: selectedFlow.updatedAt || new Date().toISOString(),
+      };
+      const existing = inMemoryVersions.get(selectedFlow.id) || [];
+      existing.unshift(version);
+      inMemoryVersions.set(selectedFlow.id, existing);
+    }
+
+    const flowFromSnapshot: IvrFlowData = {
+      id: selectedFlow.id,
+      hospitalId,
+      name: version.snapshot.name || selectedFlow.name,
+      description: version.snapshot.description,
+      status: "PUBLISHED",
+      deploymentStatus: version.deploymentStatus,
+      isDefault: selectedFlow.isDefault,
+      currentVersion: version.versionNumber,
+      nodes: version.snapshot.nodes,
+      edges: version.snapshot.edges,
+      variables: version.snapshot.variables,
+      exotelMapping: version.snapshot.exotelMapping || selectedFlow.exotelMapping,
+      lastUpdatedBy: version.publishedBy,
+      createdAt: selectedFlow.createdAt,
+      updatedAt: version.publishedAt,
+    };
+
+    return {
+      flow: flowFromSnapshot,
+      version,
+    };
+  }
+
+  /**
+   * Persists or updates the execution session state for an active IVR call.
+   */
+  public async persistExecutionSession(params: {
+    sessionId?: string;
+    flowId: string;
+    versionNumber: number;
+    callSid: string;
+    callerNumber: string;
+    hospitalId: string;
+    currentNodeId: string;
+    variables?: Record<string, unknown>;
+    status?: string;
+    executionLog: unknown[];
+  }): Promise<string> {
+    const sessionId = params.sessionId || `session_${params.callSid || Date.now()}`;
+    const dbStatus = await checkDatabaseConnection();
+
+    if (dbStatus.connected) {
+      try {
+        await prisma.ivrFlowExecutionSession.upsert({
+          where: { id: sessionId },
+          create: {
+            id: sessionId,
+            flowId: params.flowId,
+            versionNumber: params.versionNumber,
+            callSid: params.callSid,
+            callerNumber: params.callerNumber,
+            hospitalId: params.hospitalId,
+            currentNodeId: params.currentNodeId,
+            variables: params.variables as unknown as Prisma.InputJsonValue,
+            status: params.status || "ACTIVE",
+            executionLog: params.executionLog as unknown as Prisma.InputJsonValue,
+          },
+          update: {
+            currentNodeId: params.currentNodeId,
+            variables: params.variables as unknown as Prisma.InputJsonValue,
+            status: params.status || "ACTIVE",
+            executionLog: params.executionLog as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        console.warn("[IvrFlowService] DB persistExecutionSession failed:", err);
+      }
+    }
+
+    inMemoryExecutionSessions.set(sessionId, {
+      ...params,
+      id: sessionId,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return sessionId;
   }
 
   /**
