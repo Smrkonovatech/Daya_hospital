@@ -18,6 +18,7 @@ import {
 import { CallMediaSession, mediaSessionManager } from "./session-manager";
 import { AudioEngine } from "./audio-engine";
 import { getSarvamConfigSummary } from "./sarvam-config";
+import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 
 export class AgentStreamMediaGateway {
   private server: http.Server;
@@ -434,6 +435,15 @@ if (require.main === module) {
         `[SMRKOMED] Exotel AgentStream Media Gateway running on http://0.0.0.0:${activePort}`
       );
       console.log(`[SMRKOMED] Streaming WebSocket endpoint: ws://0.0.0.0:${activePort}/exotel/voicebot`);
+
+      // Pre-warm initial welcome greeting in TTS cache for instantaneous 0ms audio streaming
+      const initialGreeting =
+        "നമസ്കാരം! ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ സ്മാർക്കോമെഡ് AI അസിസ്റ്റന്റാണ്. എങ്ങനെ സഹായിക്കാം?";
+      SarvamTextToSpeechProvider.prewarmCache([initialGreeting])
+        .then(() => {
+          console.log("[SMRKOMED] Initial Malayalam greeting pre-warmed in TTS audio cache.");
+        })
+        .catch(() => {});
     })
     .catch((err) => {
       console.error("[SMRKOMED] Failed to start gateway:", err);

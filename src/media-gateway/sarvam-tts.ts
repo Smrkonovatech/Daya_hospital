@@ -16,13 +16,29 @@ import { getSarvamConfig, SarvamConfig } from "./sarvam-config";
 
 export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
   private config: SarvamConfig;
+  private static audioCache: Map<string, Buffer> = new Map();
 
   constructor(configOverrides?: Partial<SarvamConfig>) {
     this.config = getSarvamConfig(configOverrides);
   }
 
   /**
+   * Pre-warms the static audio cache with common phrases (e.g. welcome greeting).
+   */
+  public static async prewarmCache(phrases: string[], options?: { voiceId?: string; pace?: number }): Promise<void> {
+    const provider = new SarvamTextToSpeechProvider();
+    for (const phrase of phrases) {
+      try {
+        await provider.synthesize(phrase, options);
+      } catch {
+        // Ignored
+      }
+    }
+  }
+
+  /**
    * Synthesizes Malayalam text to signed 16-bit 8000 Hz mono PCM Buffer.
+   * Leverages static in-memory caching to eliminate 1-3s TTS latency on recurring phrases.
    */
   public async synthesize(
     text: string,
@@ -37,21 +53,30 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
       return Buffer.alloc(0);
     }
 
+    const trimmed = text.trim();
+    const speaker = options?.voiceId || this.config.ttsSpeaker || "kavitha";
+    const pace = options?.pace || this.config.ttsPace || 1.15;
+    const cacheKey = `${trimmed}::${speaker}::${pace}`;
+
+    if (SarvamTextToSpeechProvider.audioCache.has(cacheKey)) {
+      return SarvamTextToSpeechProvider.audioCache.get(cacheKey)!;
+    }
+
     // In Mock Mode or when API key is not configured, return test audio
     if (!this.config.isConfigured) {
-      return this.generateMockAudio(text);
+      return this.generateMockAudio(trimmed);
     }
 
     try {
       const endpoint = `${this.config.baseUrl}/text-to-speech`;
       const payload = {
-        inputs: [text.trim()],
+        inputs: [trimmed],
         target_language_code: options?.language || this.config.languageCode || "ml-IN",
-        speaker: options?.voiceId || this.config.ttsSpeaker || "kavitha",
+        speaker,
         speech_sample_rate: 8000,
         model: this.config.ttsModel || "bulbul:v3",
         enable_preprocessing: true,
-        pace: options?.pace || this.config.ttsPace || 1.15,
+        pace,
       };
 
       const res = await fetch(endpoint, {
@@ -67,7 +92,7 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
         const errorText = await res.text();
         console.error(`[SarvamTTS] Synthesis failed (HTTP ${res.status}):`, errorText);
         // Fallback to synthetic tone on API error
-        return this.generateMockAudio(text);
+        return this.generateMockAudio(trimmed);
       }
 
       const data = (await res.json()) as { audios?: string[] };
@@ -75,14 +100,20 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
 
       if (!base64Audio) {
         console.warn("[SarvamTTS] API returned empty audio array.");
-        return this.generateMockAudio(text);
+        return this.generateMockAudio(trimmed);
       }
 
       const rawBuffer = Buffer.from(base64Audio, "base64");
-      return this.extractPcmFromWav(rawBuffer);
+      const pcmBuffer = this.extractPcmFromWav(rawBuffer);
+
+      if (SarvamTextToSpeechProvider.audioCache.size < 150) {
+        SarvamTextToSpeechProvider.audioCache.set(cacheKey, pcmBuffer);
+      }
+
+      return pcmBuffer;
     } catch (err: unknown) {
       console.error("[SarvamTTS] Network or processing error:", err instanceof Error ? err.message : err);
-      return this.generateMockAudio(text);
+      return this.generateMockAudio(trimmed);
     }
   }
 
