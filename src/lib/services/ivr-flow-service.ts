@@ -28,6 +28,32 @@ const inMemoryFlows = new Map<string, IvrFlowData>();
 const inMemoryVersions = new Map<string, IvrFlowVersionData[]>();
 const inMemoryExecutionSessions = new Map<string, unknown>();
 
+export interface PersistenceHealthStatus {
+  status: "HEALTHY" | "DEGRADED";
+  unpersistedSessionCount: number;
+  lastFailureTime?: string;
+  lastFailureError?: string;
+  reconciledCount: number;
+}
+
+export interface PersistExecutionSessionParams {
+  sessionId?: string;
+  flowId: string;
+  versionNumber: number;
+  callSid: string;
+  callerNumber: string;
+  hospitalId: string;
+  currentNodeId: string;
+  variables?: Record<string, unknown>;
+  status?: string;
+  executionLog: unknown[];
+}
+
+const unpersistedExecutionSessions = new Map<string, PersistExecutionSessionParams>();
+let persistenceState: "HEALTHY" | "DEGRADED" = "HEALTHY";
+let lastPersistenceErrorDetails: { time: string; error: string; callSid?: string } | null = null;
+let totalReconciledCount = 0;
+
 export class IvrFlowService {
   /**
    * Retrieves all IVR flows for a hospital tenant.
@@ -218,6 +244,7 @@ export class IvrFlowService {
     const sessionId = params.sessionId || `session_${params.callSid || Date.now()}`;
     const dbStatus = await checkDatabaseConnection();
 
+    let persistedToDb = false;
     if (dbStatus.connected) {
       try {
         await prisma.ivrFlowExecutionSession.upsert({
@@ -241,18 +268,91 @@ export class IvrFlowService {
             executionLog: params.executionLog as unknown as Prisma.InputJsonValue,
           },
         });
-      } catch (err) {
-        console.warn("[IvrFlowService] DB persistExecutionSession failed:", err);
+        persistedToDb = true;
+        unpersistedExecutionSessions.delete(sessionId);
+
+        // Attempt reconciliation of queued sessions
+        if (unpersistedExecutionSessions.size > 0) {
+          for (const [pendId, pendParams] of Array.from(unpersistedExecutionSessions.entries())) {
+            try {
+              await prisma.ivrFlowExecutionSession.upsert({
+                where: { id: pendId },
+                create: {
+                  id: pendId,
+                  flowId: pendParams.flowId,
+                  versionNumber: pendParams.versionNumber,
+                  callSid: pendParams.callSid,
+                  callerNumber: pendParams.callerNumber,
+                  hospitalId: pendParams.hospitalId,
+                  currentNodeId: pendParams.currentNodeId,
+                  variables: pendParams.variables as unknown as Prisma.InputJsonValue,
+                  status: pendParams.status || "ACTIVE",
+                  executionLog: pendParams.executionLog as unknown as Prisma.InputJsonValue,
+                },
+                update: {
+                  currentNodeId: pendParams.currentNodeId,
+                  variables: pendParams.variables as unknown as Prisma.InputJsonValue,
+                  status: pendParams.status || "ACTIVE",
+                  executionLog: pendParams.executionLog as unknown as Prisma.InputJsonValue,
+                },
+              });
+              unpersistedExecutionSessions.delete(pendId);
+              totalReconciledCount++;
+            } catch {
+              break;
+            }
+          }
+        }
+        if (unpersistedExecutionSessions.size === 0) {
+          persistenceState = "HEALTHY";
+        }
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        persistenceState = "DEGRADED";
+        lastPersistenceErrorDetails = {
+          time: new Date().toISOString(),
+          error: errorMsg,
+          callSid: params.callSid,
+        };
+        unpersistedExecutionSessions.set(sessionId, params);
+        console.warn(
+          `[IvrFlowService:PERSISTENCE_DEGRADED] DB persistExecutionSession failed for session ${sessionId} (callSid: ${params.callSid}): ${errorMsg}. Held in memory reconciliation queue.`
+        );
       }
+    } else {
+      persistenceState = "DEGRADED";
+      lastPersistenceErrorDetails = {
+        time: new Date().toISOString(),
+        error: "PostgreSQL disconnected or DATABASE_URL unavailable",
+        callSid: params.callSid,
+      };
+      unpersistedExecutionSessions.set(sessionId, params);
+      console.warn(
+        `[IvrFlowService:PERSISTENCE_DEGRADED] Database offline. Session ${sessionId} (callSid: ${params.callSid}) held in memory reconciliation queue.`
+      );
     }
 
     inMemoryExecutionSessions.set(sessionId, {
       ...params,
       id: sessionId,
+      isDurable: persistedToDb,
       updatedAt: new Date().toISOString(),
     });
 
     return sessionId;
+  }
+
+  /**
+   * Returns live persistence health and unpersisted reconciliation metrics.
+   */
+  public getPersistenceHealth(): PersistenceHealthStatus {
+    return {
+      status: persistenceState,
+      unpersistedSessionCount: unpersistedExecutionSessions.size,
+      lastFailureTime: lastPersistenceErrorDetails?.time,
+      lastFailureError: lastPersistenceErrorDetails?.error,
+      reconciledCount: totalReconciledCount,
+    };
   }
 
   /**

@@ -83,6 +83,13 @@ export class CallMediaSession extends EventEmitter {
   public totalOutgoingBytes = 0;
   public dtmfDigits: string[] = [];
   public acknowledgedMarks: string[] = [];
+  public bargeInEvents: Array<{ timestamp: number }> = [];
+  public transferAttempt: {
+    destinationRedacted: string;
+    timestamp: number;
+    success: boolean;
+    error?: string;
+  } | null = null;
 
   // Phase 2: Live AI Speech & Conversation State
   public sttStatus: "IDLE" | "CONNECTED" | "STREAMING" | "ERROR" = "IDLE";
@@ -508,6 +515,12 @@ export class CallMediaSession extends EventEmitter {
             destination,
             this.hospitalId
           );
+          this.transferAttempt = {
+            destinationRedacted: this.maskPhoneNumber(destination),
+            timestamp: Date.now(),
+            success: res.success,
+            error: res.error,
+          };
           if (!res.success) {
             console.warn(
               `[CallSession ${this.callSid}] Exotel transfer failed: ${res.error}. Routing to fallback.`
@@ -565,6 +578,12 @@ export class CallMediaSession extends EventEmitter {
             casualtyDestination,
             this.hospitalId
           );
+          this.transferAttempt = {
+            destinationRedacted: this.maskPhoneNumber(casualtyDestination),
+            timestamp: Date.now(),
+            success: res.success,
+            error: res.error,
+          };
           if (!res.success) {
             const fallbackMsg =
               this.ivrContext?.currentLanguage === "en-IN"
@@ -915,6 +934,7 @@ export class CallMediaSession extends EventEmitter {
    * Immediately interrupts/flushes Exotel's playback buffer (caller barge-in).
    */
   public interruptPlayback(): void {
+    this.bargeInEvents.push({ timestamp: Date.now() });
     this.playbackQueue.clear();
     this.ttsStatus = "INTERRUPTED";
     this.state = "INTERRUPTED";
@@ -1047,6 +1067,87 @@ export class CallMediaSession extends EventEmitter {
       },
     };
   }
+
+  /**
+   * Produces a sanitized, redacted evidence record for controlled test calls.
+   * Strips raw PHI while capturing exact node sequences, latency, and provider outcomes.
+   */
+  public getRedactedEvidenceRecord(): RedactedCallEvidenceRecord {
+    const executedNodeSequence = this.ivrContext
+      ? this.ivrContext.history.map((h) => h.nodeId)
+      : [];
+
+    return {
+      testTimestamp: (this.startedAt || new Date()).toISOString(),
+      callSidRedacted: this.maskCallSid(this.callSid),
+      correlationId: `corr_${this.streamSid.slice(-8)}_${this.callSid.slice(-6)}`,
+      tenantId: this.hospitalId,
+      resolvedExoPhone: this.toNumber,
+      callerNumberRedacted: this.maskPhoneNumber(this.fromNumber),
+      publishedFlowId: this.ivrFlow?.id || null,
+      publishedFlowVersion: this.ivrVersion || null,
+      executedNodeSequence,
+      dtmfEvents: this.dtmfDigits.map((d, i) => ({ digit: d, index: i + 1 })),
+      sarvamMetrics: {
+        turnCount: this.turnLatencyMetrics.length,
+        averageSpeechEndToResponseMs:
+          this.turnLatencyMetrics.length > 0
+            ? Math.round(
+                this.turnLatencyMetrics.reduce(
+                  (acc, t) => acc + t.latencies.totalSpeechEndToAudibleResponseMs,
+                  0
+                ) / this.turnLatencyMetrics.length
+              )
+            : null,
+        lastTurnLatencyMs:
+          this.turnLatencyMetrics[this.turnLatencyMetrics.length - 1]?.latencies
+            .totalSpeechEndToAudibleResponseMs ?? null,
+        sttStatus: this.sttStatus,
+        ttsStatus: this.ttsStatus,
+      },
+      bargeInCount: this.bargeInEvents.length,
+      transferAttempt: this.transferAttempt,
+      callTerminationStatus: this.state,
+      persistenceStatus: this.ivrService.getPersistenceHealth().status,
+    };
+  }
+
+  private maskCallSid(sid: string): string {
+    if (!sid) return "UNKNOWN";
+    if (sid.length <= 8) return sid;
+    return `${sid.slice(0, 4)}...${sid.slice(-4)}`;
+  }
+
+  private maskPhoneNumber(num: string): string {
+    if (!num) return "UNKNOWN";
+    const cleaned = num.replace(/\s+/g, "");
+    if (cleaned.length <= 5) return "***";
+    return `${cleaned.slice(0, 3)}****${cleaned.slice(-2)}`;
+  }
+}
+
+export interface RedactedCallEvidenceRecord {
+  testTimestamp: string;
+  callSidRedacted: string;
+  correlationId: string;
+  tenantId: string;
+  resolvedExoPhone: string;
+  callerNumberRedacted: string;
+  publishedFlowId: string | null;
+  publishedFlowVersion: number | null;
+  executedNodeSequence: string[];
+  dtmfEvents: Array<{ digit: string; index: number }>;
+  sarvamMetrics: {
+    turnCount: number;
+    averageSpeechEndToResponseMs: number | null;
+    lastTurnLatencyMs: number | null;
+    sttStatus: string;
+    ttsStatus: string;
+  };
+  bargeInCount: number;
+  transferAttempt: { destinationRedacted: string; success: boolean; error?: string } | null;
+  callTerminationStatus: string;
+  persistenceStatus: "HEALTHY" | "DEGRADED";
 }
 
 export interface CompletedSessionSummary {
@@ -1069,6 +1170,7 @@ export interface CompletedSessionSummary {
   timestamp: string;
   averageTurnLatencyMs?: number | null;
   turnLatencyMetrics?: TurnLatencyMetrics[];
+  evidenceRecord?: RedactedCallEvidenceRecord;
   ivrRuntime?: {
     isExecutingIvrFlow: boolean;
     flowId: string | null;
@@ -1164,6 +1266,7 @@ export class MediaSessionManager extends EventEmitter {
         timestamp: new Date().toISOString(),
         averageTurnLatencyMs,
         turnLatencyMetrics: session.turnLatencyMetrics,
+        evidenceRecord: session.getRedactedEvidenceRecord(),
       });
       if (this.completedSessions.length > 30) {
         this.completedSessions.shift();

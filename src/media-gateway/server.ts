@@ -19,6 +19,7 @@ import { CallMediaSession, mediaSessionManager } from "./session-manager";
 import { AudioEngine } from "./audio-engine";
 import { getSarvamConfigSummary } from "./sarvam-config";
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
+import { ivrFlowService } from "@/lib/services/ivr-flow-service";
 
 export class AgentStreamMediaGateway {
   private server: http.Server;
@@ -115,6 +116,7 @@ export class AgentStreamMediaGateway {
                 .getAllActiveSessions()
                 .filter((s) => !s.isExecutingIvrFlow).length,
             },
+            persistence: ivrFlowService.getPersistenceHealth(),
             latencyTelemetry: {
               aggregates: mediaSessionManager.getAggregateLatencyStats(),
               recentTurnMetrics: mediaSessionManager.getRecentTurnMetrics(

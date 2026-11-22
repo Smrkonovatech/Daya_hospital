@@ -30,9 +30,7 @@ RUN npm ci --omit=dev --ignore-scripts && \
 
 # 3. Copy application source, TypeScript configuration, and runtime assets
 COPY tsconfig.json ./
-COPY src/media-gateway ./src/media-gateway
-COPY src/lib/config ./src/lib/config
-COPY src/types ./src/types
+COPY src ./src
 
 EXPOSE 8080
 
