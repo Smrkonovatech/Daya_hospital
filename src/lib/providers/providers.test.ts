@@ -114,6 +114,33 @@ describe("Provider Abstraction Layer (Phase 2 & 3)", () => {
       expect(result.mimeType).toBe("audio/wav");
       expect(result.sampleRate).toBe(8000);
     });
+
+    it("rejects unavailable speaker meera with clear explanation", async () => {
+      const result = await sarvamAiProvider.generateSpeech({
+        text: "നമസ്കാരം",
+        languageCode: "ml-IN",
+        model: "bulbul:v3",
+        speaker: "meera",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Speaker 'meera' is not available");
+    });
+
+    it("synthesizes valid English speech audio with verified speaker", async () => {
+      const result = await sarvamAiProvider.generateSpeech({
+        text: "Welcome to Daya Hospital Thrissur.",
+        languageCode: "en-IN",
+        model: "bulbul:v3",
+        speaker: "ratan",
+        pace: 1.0,
+        sampleRate: 8000,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.audioBuffer).toBeDefined();
+      expect(result.mimeType).toBe("audio/wav");
+    });
   });
 });
 

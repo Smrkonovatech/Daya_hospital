@@ -513,13 +513,14 @@ function AgentBuilderContent() {
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {SARVAM_SPEAKERS.map((spk) => {
                           const isCompatible = spk.compatibleTtsModels.includes(agent.ttsModel);
+                          const isAvailable = spk.isAvailable !== false;
                           const isSelected = agent.speaker === spk.id;
                           return (
                             <div
                               key={spk.id}
-                              onClick={() => isCompatible && setAgent({ ...agent, speaker: spk.id })}
+                              onClick={() => isCompatible && isAvailable && setAgent({ ...agent, speaker: spk.id })}
                               className={`p-3 rounded-xl border transition-all ${
-                                !isCompatible
+                                !isCompatible || !isAvailable
                                   ? "opacity-50 cursor-not-allowed bg-slate-100 border-slate-200"
                                   : isSelected
                                   ? "border-[#0C5DB8] bg-blue-50/70 ring-1 ring-[#0C5DB8] cursor-pointer"
@@ -528,14 +529,25 @@ function AgentBuilderContent() {
                             >
                               <div className="flex justify-between items-center mb-1">
                                 <span className="font-bold text-slate-900 capitalize">{spk.name}</span>
-                                <Badge variant="outline" size="sm" className="text-[10px]">
-                                  {spk.gender}
+                                <Badge
+                                  variant={!isAvailable ? "danger" : isSelected ? "teal" : "outline"}
+                                  size="sm"
+                                  className="text-[10px]"
+                                >
+                                  {!isAvailable ? "Unavailable" : spk.gender}
                                 </Badge>
                               </div>
                               <p className="text-[11px] text-slate-500 line-clamp-2">{spk.description}</p>
-                              <div className="mt-2 text-[10px] text-[#0C5DB8] font-medium">
-                                Langs: {spk.supportedLanguages.join(", ")}
-                              </div>
+                              {!isAvailable && spk.unavailabilityReason && (
+                                <p className="text-[10px] text-red-600 mt-1 font-medium leading-tight">
+                                  {spk.unavailabilityReason}
+                                </p>
+                              )}
+                              {isAvailable && (
+                                <div className="mt-2 text-[10px] text-[#0C5DB8] font-medium">
+                                  Langs: {spk.supportedLanguages.join(", ")}
+                                </div>
+                              )}
                             </div>
                           );
                         })}

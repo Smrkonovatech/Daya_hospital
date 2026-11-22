@@ -141,11 +141,14 @@ export class CallMediaSession extends EventEmitter {
         languageCode: "ml-IN",
         silenceTimeoutMs: options.silenceTimeoutMs ?? 400,
       });
+    const resolvedAgent = this.tenantResult.assignedAgent;
     this.ttsProvider =
       options.ttsProvider ||
-      new SarvamTextToSpeechProvider(
-        options.ttsPace ? { ttsPace: options.ttsPace } : undefined
-      );
+      new SarvamTextToSpeechProvider({
+        ttsPace: options.ttsPace ?? resolvedAgent?.speakingPace,
+        ttsSpeaker: resolvedAgent?.speaker,
+        ttsModel: resolvedAgent?.ttsModel,
+      });
 
     this.setupSpeechListeners();
     this.state = "CONNECTED";

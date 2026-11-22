@@ -264,12 +264,31 @@ export class ExotelTelephonyService {
     // 4. Durable Idempotency & Duplicate Call Prevention
     const idempotencyKey = params.idempotencyKey?.trim();
     if (idempotencyKey) {
+      const isProduction = process.env.NODE_ENV === "production";
       const reservation = await durableConcurrencyService.acquireIdempotencyReservation(
         hospitalId,
         idempotencyKey,
         "OUTBOUND_CALL",
-        30
+        30,
+        { requireDurable: isProduction }
       );
+
+      if (reservation.error) {
+        return {
+          success: false,
+          callId: "",
+          callSid: "",
+          hospitalId,
+          patientId: params.patientId,
+          phoneNumber: phoneNorm.e164,
+          purpose: params.purpose,
+          mode: params.mode || "AI",
+          status: "FAILED",
+          correlationId,
+          createdAt: nowIso,
+          error: reservation.error,
+        };
+      }
 
       if (!reservation.isFirstAcquisition) {
         if (reservation.cachedResponse) {

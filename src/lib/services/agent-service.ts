@@ -13,6 +13,7 @@
  */
 
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
+import type { Prisma } from "@prisma/client";
 import { sarvamAiProvider } from "@/lib/providers/ai/sarvam/sarvam-provider";
 import {
   SARVAM_SPEAKERS,
@@ -21,6 +22,7 @@ import {
   SARVAM_LLM_MODELS,
 } from "@/lib/providers/ai/sarvam/sarvam-capabilities";
 import { durableConcurrencyService } from "./durable-concurrency";
+import { configurationService } from "./configuration-service";
 
 export interface AgentPromptSections {
   agentName: string;
@@ -35,6 +37,7 @@ export interface AgentPromptSections {
   emergencyRules: string[];
   appointmentRules?: string[];
   customInstructions?: string;
+  emergencyNumber?: string;
 }
 
 export interface AgentConfigData {
@@ -116,23 +119,25 @@ export class AgentService {
    * Compiles structured prompt sections into an authoritative system prompt.
    */
   public compileSystemPrompt(sections: AgentPromptSections): string {
+    const hospital = sections.hospitalName || "the hospital";
+    const emergencyNum = sections.emergencyNumber ? ` at ${sections.emergencyNumber}` : "";
     const safeguards = sections.clinicalSafeguards?.length > 0
       ? sections.clinicalSafeguards.map((s) => `- ${s}`).join("\n")
-      : "- Never provide clinical diagnoses or prescribe medication.\n- Always advise consulting a qualified Daya Hospital doctor for medical evaluation.";
+      : `- Never provide clinical diagnoses or prescribe medication.\n- Always advise consulting a qualified ${hospital} doctor for medical evaluation.`;
 
     const emergency = sections.emergencyRules?.length > 0
       ? sections.emergencyRules.map((e) => `- ${e}`).join("\n")
-      : "- If the caller reports chest pain, severe shortness of breath, acute trauma, or unconsciousness, IMMEDIATELY advise contacting Casualty at +91 96066 54032 or dial extension 100.";
+      : `- If the caller reports chest pain, severe shortness of breath, acute trauma, or unconsciousness, IMMEDIATELY advise contacting Casualty${emergencyNum} or emergency department.`;
 
     return `You are ${sections.agentName}, an intelligent and empathetic AI voice assistant representing ${sections.hospitalName}, ${sections.location}.
 
 ROLE & OBJECTIVE:
-${sections.role || "Assist callers with hospital enquiries, OPD doctor schedules, appointment bookings, and department guidance in natural Malayalam and English."}
+${sections.role || `Assist callers with hospital enquiries, OPD doctor schedules, appointment bookings, and department guidance in natural ${sections.primaryLanguage === "ml-IN" ? "Malayalam and English" : "English and regional languages"}.`}
 
 LANGUAGE & COMMUNICATION:
-- Primary Language: ${sections.primaryLanguage === "ml-IN" ? "Malayalam (മലയാളം)" : "English"}.
+- Primary Language: ${sections.primaryLanguage === "ml-IN" ? "Malayalam (മലയാളം)" : sections.primaryLanguage}.
 - Supported Languages: ${sections.allowedLanguages.join(", ")}.
-- You understand Manglish and mixed Malayalam-English speech naturally.
+- You understand regional colloquial phrasing and mixed speech naturally.
 - Tone: ${sections.conversationTone.replace(/_/g, " ").toLowerCase()}.
 - Keep spoken replies ${sections.responseLength.toLowerCase()}, clear, and free from markdown formatting, asterisks, or bullet points.
 
@@ -149,36 +154,58 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
   }
 
   /**
-   * Creates a default agent baseline for Daya Hospital.
+   * Creates a default agent baseline for a hospital tenant.
+   * Tailored for Daya Hospital as pilot, but configurable for any tenant.
    */
-  public createDefaultAgent(hospitalId: string, id = `agent_${Date.now()}`): AgentConfigData {
+  public createDefaultAgent(
+    hospitalId: string,
+    id = `agent_${Date.now()}`,
+    tenantDefaults?: Partial<AgentPromptSections>
+  ): AgentConfigData {
+    const isDaya = hospitalId === "hosp_daya_thrissur";
+    const hospitalName = tenantDefaults?.hospitalName || (isDaya ? "Daya General Hospital & Specialty Surgical Centre" : "Hospital Voice Platform");
+    const location = tenantDefaults?.location || (isDaya ? "Thrissur, Kerala" : "Hospital Campus");
+    const emergencyNumber = tenantDefaults?.emergencyNumber || (isDaya ? "+91 96066 54032" : "");
+    const primaryLanguage = tenantDefaults?.primaryLanguage || (isDaya ? "ml-IN" : "en-IN");
+    const allowedLanguages = tenantDefaults?.allowedLanguages || (primaryLanguage === "ml-IN" ? ["ml-IN", "en-IN"] : [primaryLanguage, "en-IN"]);
+
     const promptSections: AgentPromptSections = {
-      agentName: "Daya AI Receptionist",
-      role: "Serve as the official first-point-of-contact voice receptionist for Daya Hospital.",
-      hospitalName: "Daya General Hospital & Specialty Surgical Centre",
-      location: "Thrissur, Kerala",
-      primaryLanguage: "ml-IN",
-      allowedLanguages: ["ml-IN", "en-IN"],
-      conversationTone: "EMPATHETIC_PROFESSIONAL",
-      responseLength: "CONCISE",
-      clinicalSafeguards: [
+      agentName: tenantDefaults?.agentName || (isDaya ? "Daya AI Receptionist" : "Hospital AI Receptionist"),
+      role: tenantDefaults?.role || `Serve as the official first-point-of-contact voice receptionist for ${hospitalName}.`,
+      hospitalName,
+      location,
+      primaryLanguage,
+      allowedLanguages,
+      conversationTone: tenantDefaults?.conversationTone || "EMPATHETIC_PROFESSIONAL",
+      responseLength: tenantDefaults?.responseLength || "CONCISE",
+      clinicalSafeguards: tenantDefaults?.clinicalSafeguards || [
         "Never provide medical diagnoses or alter prescribed treatment regimens.",
-        "Recommend doctor consultations for any specific symptoms.",
+        `Recommend consulting a qualified ${hospitalName} doctor for any medical evaluation.`,
       ],
-      emergencyRules: [
-        "Immediate emergency transfer to Casualty hotline (+91 96066 54032) or extension 100 upon acute distress.",
+      emergencyRules: tenantDefaults?.emergencyRules || [
+        emergencyNumber
+          ? `Immediate emergency transfer to Casualty hotline (${emergencyNumber}) or emergency department upon acute distress.`
+          : "Immediate emergency transfer to casualty or ambulance services upon acute distress.",
       ],
-      appointmentRules: [
+      appointmentRules: tenantDefaults?.appointmentRules || [
         "Collect patient name, phone number, and required department.",
         "Check doctor OPD schedule before confirming appointment.",
       ],
+      emergencyNumber,
     };
+
+    const greetingMalayalam = isDaya
+      ? "നമസ്കാരം, ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ ദയ എഐ അസിസ്റ്റന്റാണ്. എനിക്ക് എങ്ങനെ സഹായിക്കാനാകും?"
+      : `നമസ്കാരം, ${hospitalName}ലേക്ക് സ്വാഗതം. ഞാൻ എഐ അസിസ്റ്റന്റാണ്. എങ്ങനെ സഹായിക്കണം?`;
+    const greetingEnglish = isDaya
+      ? "Hello, welcome to Daya Hospital. I am the AI voice assistant. How may I assist you today?"
+      : `Hello, welcome to ${hospitalName}. I am the AI voice assistant. How may I assist you today?`;
 
     return {
       id,
       hospitalId,
-      name: "Main Voice Receptionist (Malayalam)",
-      description: "Primary hospital front-desk voice assistant for patient OPD enquiries and appointment booking.",
+      name: isDaya ? "Main Voice Receptionist (Malayalam)" : "Main Voice Receptionist",
+      description: `Primary hospital front-desk voice assistant for ${hospitalName} patient enquiries and appointment booking.`,
       purpose: "RECEPTIONIST",
       status: "DRAFT",
       isDefault: true,
@@ -186,12 +213,12 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
       sttModel: "saaras:v4",
       llmModel: "sarvam-105b-conversations",
       ttsModel: "bulbul:v3",
-      speaker: "kavitha",
+      speaker: primaryLanguage === "ml-IN" ? "kavitha" : "ratan",
       speakingPace: 1.15,
-      defaultLanguage: "ml-IN",
-      supportedLanguages: ["ml-IN", "en-IN"],
-      greetingMalayalam: "നമസ്കാരം, ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ ദയ എഐ അസിസ്റ്റന്റാണ്. എനിക്ക് എങ്ങനെ സഹായിക്കാനാകും?",
-      greetingEnglish: "Hello, welcome to Daya Hospital. I am the AI voice assistant. How may I assist you today?",
+      defaultLanguage: primaryLanguage,
+      supportedLanguages: allowedLanguages,
+      greetingMalayalam,
+      greetingEnglish,
       systemPrompt: this.compileSystemPrompt(promptSections),
       promptSections,
       personalityTone: "EMPATHETIC_PROFESSIONAL",
@@ -226,8 +253,8 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             hospitalId: r.hospitalId,
             name: r.name,
             description: r.description || undefined,
-            purpose: r.purpose as any,
-            status: r.status as any,
+            purpose: r.purpose as AgentConfigData["purpose"],
+            status: r.status as AgentConfigData["status"],
             isDefault: r.isDefault,
             currentVersion: r.currentVersion,
             sttModel: r.sttModel,
@@ -240,7 +267,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             greetingMalayalam: r.greetingMalayalam,
             greetingEnglish: r.greetingEnglish,
             systemPrompt: r.systemPrompt,
-            promptSections: r.promptSections as any,
+            promptSections: r.promptSections as unknown as AgentPromptSections,
             personalityTone: r.personalityTone,
             responseLength: r.responseLength,
             languageSwitchMode: r.languageSwitchMode,
@@ -285,8 +312,8 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             hospitalId: r.hospitalId,
             name: r.name,
             description: r.description || undefined,
-            purpose: r.purpose as any,
-            status: r.status as any,
+            purpose: r.purpose as AgentConfigData["purpose"],
+            status: r.status as AgentConfigData["status"],
             isDefault: r.isDefault,
             currentVersion: r.currentVersion,
             sttModel: r.sttModel,
@@ -299,7 +326,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             greetingMalayalam: r.greetingMalayalam,
             greetingEnglish: r.greetingEnglish,
             systemPrompt: r.systemPrompt,
-            promptSections: r.promptSections as any,
+            promptSections: r.promptSections as unknown as AgentPromptSections,
             personalityTone: r.personalityTone,
             responseLength: r.responseLength,
             languageSwitchMode: r.languageSwitchMode,
@@ -404,7 +431,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             greetingMalayalam: merged.greetingMalayalam,
             greetingEnglish: merged.greetingEnglish,
             systemPrompt: merged.systemPrompt,
-            promptSections: merged.promptSections as any,
+            promptSections: merged.promptSections as unknown as Prisma.InputJsonValue,
             personalityTone: merged.personalityTone,
             responseLength: merged.responseLength,
             languageSwitchMode: merged.languageSwitchMode,
@@ -431,7 +458,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             greetingMalayalam: merged.greetingMalayalam,
             greetingEnglish: merged.greetingEnglish,
             systemPrompt: merged.systemPrompt,
-            promptSections: merged.promptSections as any,
+            promptSections: merged.promptSections as unknown as Prisma.InputJsonValue,
             personalityTone: merged.personalityTone,
             responseLength: merged.responseLength,
             languageSwitchMode: merged.languageSwitchMode,
@@ -502,8 +529,12 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
       errors.push({ field: "name", message: "Agent name is required." });
     }
 
-    if (!agent.greetingMalayalam?.trim()) {
-      errors.push({ field: "greetingMalayalam", message: "Malayalam greeting is mandatory for patient calls." });
+    if (agent.defaultLanguage === "ml-IN" && !agent.greetingMalayalam?.trim()) {
+      errors.push({ field: "greetingMalayalam", message: "Malayalam greeting is mandatory when Malayalam is the primary language." });
+    } else if (agent.defaultLanguage === "en-IN" && !agent.greetingEnglish?.trim()) {
+      errors.push({ field: "greetingEnglish", message: "English greeting is mandatory when English is the primary language." });
+    } else if (!agent.greetingMalayalam?.trim() && !agent.greetingEnglish?.trim()) {
+      errors.push({ field: "greeting", message: "A greeting message in the agent's primary language is required." });
     }
 
     // Model validation
@@ -519,6 +550,11 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
     const speaker = SARVAM_SPEAKERS.find((s) => s.id === agent.speaker);
     if (!speaker) {
       errors.push({ field: "speaker", message: `Unknown speaker '${agent.speaker}'.` });
+    } else if (speaker.isAvailable === false) {
+      errors.push({
+        field: "speaker",
+        message: speaker.unavailabilityReason || `Speaker '${agent.speaker}' is not available in Sarvam catalogue.`,
+      });
     } else if (!speaker.compatibleTtsModels.includes(agent.ttsModel)) {
       errors.push({
         field: "speaker",
@@ -593,7 +629,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
             versionNumber: nextVersion,
             status: "PUBLISHED",
             changelog: changelog || `Published version ${nextVersion}`,
-            snapshotJson: agent as any,
+            snapshotJson: agent as unknown as Prisma.InputJsonValue,
             publishedBy: userName,
           },
         });
@@ -657,7 +693,7 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
     }
 
     // Restore and publish as new version
-    const restored = await this.saveAgent(
+    await this.saveAgent(
       {
         ...targetSnapshot,
         id: agentId,
@@ -743,6 +779,25 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
       lower.includes("മനുഷ്യൻ") ||
       lower.includes("സംസാരിക്കണം");
 
+    // Fetch tenant and agent configuration dynamically
+    const agent = await this.getAgentById(params.agentId, params.hospitalId);
+    let hospitalDisplayName = "Hospital Voice Assistant";
+    let casualtyHotline = "+919606654032";
+
+    try {
+      const config = await configurationService.getDraft(params.hospitalId, false);
+      if (config) {
+        if (config.displayName) hospitalDisplayName = config.displayName;
+        if (config.emergencyEscalationPolicy?.casualtyHotline) {
+          casualtyHotline = config.emergencyEscalationPolicy.casualtyHotline;
+        } else if (config.emergencyDestinations?.[0]) {
+          casualtyHotline = config.emergencyDestinations[0];
+        }
+      }
+    } catch {
+      // Fall back
+    }
+
     let replyText = "";
     let detectedIntent = "GENERAL_ENQUIRY";
     let handoffTriggered = false;
@@ -751,38 +806,42 @@ ${sections.customInstructions ? `ADDITIONAL INSTRUCTIONS:\n${sections.customInst
     if (isEmergency) {
       detectedIntent = "EMERGENCY_CASUALTY";
       handoffTriggered = true;
-      handoffDestination = "Casualty Hotline (+91 96066 54032)";
+      handoffDestination = `Casualty Hotline (${casualtyHotline})`;
       replyText = isMalayalam
-        ? "ഇതൊരു അത്യാഹിത സാഹചര്യമായതിനാൽ ഞാൻ കാഷ്വാലിറ്റിയിലേക്ക് ഉടൻ കണക്റ്റ് ചെയ്യുന്നു. ദയവായി ലൈനിൽ തുടരുക."
-        : "This seems like an emergency. I am immediately connecting you to Daya Hospital Casualty. Please hold on.";
+        ? `ഇതൊരു അത്യാഹിത സാഹചര്യമായതിനാൽ ഞാൻ കാഷ്വാലിറ്റിയിലേക്ക് (${casualtyHotline}) ഉടൻ കണക്റ്റ് ചെയ്യുന്നു. ദയവായി ലൈനിൽ തുടരുക.`
+        : `This seems like an emergency. I am immediately connecting you to ${hospitalDisplayName} Casualty at ${casualtyHotline}. Please hold on.`;
     } else if (isHandoff) {
       detectedIntent = "TRANSFER_TO_STAFF";
       handoffTriggered = true;
-      handoffDestination = "Hospital Front Desk (Ext 201)";
+      handoffDestination = "Hospital Front Desk (Staff Queue)";
       replyText = isMalayalam
         ? "തീർച്ചയായും, ഞാൻ നിങ്ങളെ ഞങ്ങളുടെ ഫ്രണ്ട് ഡെസ്ക് സ്റ്റാഫിലേക്ക് ട്രാൻസ്ഫർ ചെയ്യുന്നു. ദയവായി ഒരു നിമിഷം കാത്തിരിക്കൂ."
-        : "Certainly, transferring your call to our front-desk reception staff. Please hold on a moment.";
+        : `Certainly, transferring your call to ${hospitalDisplayName} reception staff. Please hold on a moment.`;
     } else if (lower.includes("doctor") || lower.includes("appointment") || lower.includes("ഡോക്ടർ")) {
       detectedIntent = "APPOINTMENT_BOOKING";
       replyText = isMalayalam
-        ? "ദയ ഹോസ്പിറ്റലിൽ ഡോക്ടർ സുരേഷ് കുമാർ (കാർഡിയോളജി) ഇന്ന് രാവിലെ 10 മണി മുതൽ ലഭ്യമാണ്. അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്യണോ?"
-        : "Dr. Suresh Kumar (Cardiology) is available today from 10:00 AM at Daya Hospital. Would you like to confirm a booking?";
+        ? `${hospitalDisplayName} ഒപിഡി കൺസൾട്ടേഷനുകൾക്കായി ലഭ്യമായ സമയങ്ങൾ പരിശോധിക്കാം. ഏത് ഡിപ്പാർട്ട്‌മെന്റിലേക്കാണ് അപ്പോയിന്റ്മെന്റ് വേണ്ടത്?`
+        : `I can assist with scheduling an outpatient consultation at ${hospitalDisplayName}. Which department or doctor would you like to consult?`;
     } else {
       replyText = isMalayalam
-        ? "ദയ ജനറൽ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഒപിഡി കൺസൾട്ടേഷൻ, ഡോക്ടർ സമയം, ലബോറട്ടറി പരിശോധനകൾ എന്നിവയ്ക്ക് ഞാൻ സഹായിക്കാം. എന്താണ് താങ്കൾക്ക് അറിയേണ്ടത്?"
-        : "Welcome to Daya General Hospital. I can assist with OPD consultations, doctor timings, and lab tests. How can I assist you?";
+        ? `${hospitalDisplayName}ലേക്ക് സ്വാഗതം. ഒപിഡി കൺസൾട്ടേഷൻ, ഡോക്ടർ സമയം, ലബോറട്ടറി പരിശോധനകൾ എന്നിവയ്ക്ക് ഞാൻ സഹായിക്കാം. എന്താണ് താങ്കൾക്ക് അറിയേണ്ടത്?`
+        : `Welcome to ${hospitalDisplayName}. I can assist with OPD consultations, doctor timings, and department guidance. How can I assist you?`;
     }
+
+    const ttsModel = agent?.ttsModel || "bulbul:v3";
+    const speaker = agent?.speaker || (isMalayalam ? "kavitha" : "ratan");
+    const pace = agent?.speakingPace || 1.15;
 
     const sttMs = 45;
     const llmMs = 120;
 
-    // Generate response speech audio via Sarvam TTS
+    // Generate response speech audio via Sarvam TTS with tenant's configured voice parameters
     const ttsRes = await sarvamAiProvider.generateSpeech({
       text: replyText,
-      languageCode: isMalayalam ? "ml-IN" : "en-IN",
-      model: "bulbul:v3",
-      speaker: "kavitha",
-      pace: 1.15,
+      languageCode: isMalayalam ? "ml-IN" : (params.language || "en-IN"),
+      model: ttsModel,
+      speaker,
+      pace,
       sampleRate: 8000,
     });
 

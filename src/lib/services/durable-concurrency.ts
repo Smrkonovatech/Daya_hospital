@@ -18,6 +18,8 @@ export interface ReservationResult {
   cachedResponse?: Record<string, unknown>;
   callSid?: string;
   callId?: string;
+  durable: boolean;
+  error?: string;
 }
 
 export interface RateLimitResult {
@@ -57,7 +59,8 @@ export class DurableConcurrencyService {
     hospitalId: string,
     idempotencyKey: string,
     resourceType: "OUTBOUND_CALL" | "CONFIG_PUBLISH" | "AGENT_UPDATE",
-    ttlMinutes = 30
+    ttlMinutes = 30,
+    options?: { requireDurable?: boolean }
   ): Promise<ReservationResult> {
     const memoryKey = `${hospitalId}:${idempotencyKey}`;
     const now = Date.now();
@@ -80,8 +83,15 @@ export class DurableConcurrencyService {
         cachedResponse: parsedResponse,
         callSid: cached.callSid,
         callId: cached.callId,
+        durable: false,
       };
     }
+
+    // Atomically reserve in local memory for this node to block concurrent same-tick requests
+    inMemoryReservations.set(memoryKey, {
+      status: "PENDING",
+      expiresAt: expiresAt.getTime(),
+    });
 
     // 2. Check Database if connected
     const dbStatus = await checkDatabaseConnection();
@@ -106,6 +116,7 @@ export class DurableConcurrencyService {
         return {
           isFirstAcquisition: true,
           status: "PENDING",
+          durable: true,
         };
       } catch {
         // Unique constraint violation (P2002) means duplicate exists
@@ -139,28 +150,28 @@ export class DurableConcurrencyService {
             cachedResponse: parsedResponse,
             callSid: existing.callSid || undefined,
             callId: existing.callId || undefined,
+            durable: true,
           };
         }
       }
     }
 
-    // 3. Fallback to memory store
-    if (!cached || now >= cached.expiresAt) {
-      inMemoryReservations.set(memoryKey, {
-        status: "PENDING",
-        expiresAt: expiresAt.getTime(),
-      });
+    // 3. Fail safe when durable storage is strictly required (e.g. Outbound Calls)
+    if (options?.requireDurable) {
+      inMemoryReservations.delete(memoryKey);
       return {
-        isFirstAcquisition: true,
-        status: "PENDING",
+        isFirstAcquisition: false,
+        status: "FAILED",
+        durable: false,
+        error: "DURABLE_STORAGE_UNAVAILABLE: PostgreSQL is required for guaranteed distributed call idempotency. Outbound call creation aborted to prevent duplicate dialing.",
       };
     }
 
+    // 4. Best-effort memory fallback for non-critical resources (e.g. UI preview turns)
     return {
-      isFirstAcquisition: false,
-      status: cached.status,
-      callSid: cached.callSid,
-      callId: cached.callId,
+      isFirstAcquisition: true,
+      status: "PENDING",
+      durable: false,
     };
   }
 

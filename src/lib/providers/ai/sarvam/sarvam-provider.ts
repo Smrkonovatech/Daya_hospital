@@ -78,7 +78,27 @@ export class SarvamAiProvider implements IAiProvider {
 
     // 2. Invariant Validation: Check Model & Speaker Compatibility
     const speakerInfo = SARVAM_SPEAKERS.find((s) => s.id === params.speaker);
-    if (speakerInfo && !speakerInfo.compatibleTtsModels.includes(params.model)) {
+    if (!speakerInfo) {
+      return {
+        success: false,
+        mimeType: "audio/wav",
+        sampleRate: params.sampleRate || 8000,
+        latencyMs: Date.now() - startTime,
+        error: `Unknown voice speaker '${params.speaker}'. Available bulbul:v3 verified speakers include: kavitha, ratan, shubh, priya, rohan, pooja.`,
+      };
+    }
+
+    if (speakerInfo.isAvailable === false) {
+      return {
+        success: false,
+        mimeType: "audio/wav",
+        sampleRate: params.sampleRate || 8000,
+        latencyMs: Date.now() - startTime,
+        error: `Speaker '${params.speaker}' is not available. ${speakerInfo.unavailabilityReason || `Not supported by Sarvam ${params.model}.`}`,
+      };
+    }
+
+    if (!speakerInfo.compatibleTtsModels.includes(params.model)) {
       return {
         success: false,
         mimeType: "audio/wav",

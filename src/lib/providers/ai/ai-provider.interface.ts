@@ -29,6 +29,8 @@ export interface SpeakerCapabilityItem {
   supportedLanguages: string[];
   sampleAudioUrl?: string;
   isVerified: boolean;
+  isAvailable?: boolean;
+  unavailabilityReason?: string;
   description: string;
 }
 

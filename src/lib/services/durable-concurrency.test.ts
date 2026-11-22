@@ -83,5 +83,48 @@ describe("DurableConcurrencyService (Phase 2)", () => {
     expect(r4.allowed).toBe(false);
     expect(r4.retryAfterSeconds).toBeGreaterThan(0);
   });
+
+  it("fails safely when requireDurable is true and shared PostgreSQL is unavailable", async () => {
+    // When DB is not connected and requireDurable is strictly enforced
+    const key = `idem_strict_${Date.now()}`;
+    const result = await durableConcurrencyService.acquireIdempotencyReservation(
+      hospitalId,
+      key,
+      "OUTBOUND_CALL",
+      30,
+      { requireDurable: true }
+    );
+
+    // In unit test environment without real DB, requireDurable must safely reject rather than fake durability
+    expect(result.durable).toBe(false);
+    expect(result.isFirstAcquisition).toBe(false);
+    expect(result.status).toBe("FAILED");
+    expect(result.error).toContain("DURABLE_STORAGE_UNAVAILABLE");
+  });
+
+  it("handles concurrent atomic requests across simulated multi-instance callers", async () => {
+    const sharedKey = `idem_concurrent_${Date.now()}`;
+
+    // Simulate 5 simultaneous requests from concurrent workers
+    const promises = Array.from({ length: 5 }).map(() =>
+      durableConcurrencyService.acquireIdempotencyReservation(
+        hospitalId,
+        sharedKey,
+        "OUTBOUND_CALL",
+        30,
+        { requireDurable: false }
+      )
+    );
+
+    const results = await Promise.all(promises);
+    const firstAcquisitions = results.filter((r) => r.isFirstAcquisition);
+
+    // Exactly 1 caller must acquire the reservation
+    expect(firstAcquisitions.length).toBe(1);
+
+    // The other 4 must be flagged as duplicates
+    const duplicates = results.filter((r) => !r.isFirstAcquisition);
+    expect(duplicates.length).toBe(4);
+  });
 });
 

@@ -34,6 +34,15 @@ export interface TenantResolutionResult {
   warning?: string;
   publishedConfigVersion?: number;
   assignedAgentId?: string;
+  assignedAgent?: {
+    sttModel?: string;
+    ttsModel?: string;
+    speaker?: string;
+    speakingPace?: number;
+    systemPrompt?: string;
+    greetingMalayalam?: string;
+    greetingEnglish?: string;
+  };
 }
 
 export class TenantResolver {
