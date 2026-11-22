@@ -476,3 +476,189 @@ model Hospital {
 
   @@index([status])
 }
+
+// ----------------------------------------------------
+// 9. HOSPITAL CONFIGURATION & VERSIONING (PHASE 2)
+// ----------------------------------------------------
+
+model HospitalConfigDraft {
+  id                            String   @id @default(cuid())
+  hospitalId                    String   @unique
+  displayName                   String?
+  timezone                      String   @default("Asia/Kolkata")
+  defaultLanguage               String   @default("ml-IN")
+  supportedLanguages            String[] @default(["ml-IN", "en-IN"])
+  
+  // Telephony Configuration
+  telephonyProvider             String   @default("EXOTEL")
+  exotelAccountSid              String?
+  exotelRegion                  String   @default("singapore")
+  exotelSubdomain               String   @default("api.exotel.com")
+  exotelApiKeyEncrypted         String?
+  exotelApiTokenEncrypted       String?
+  exotelDefaultExoPhone         String?
+  exotelDefaultAppId            String?
+  exotelWebhookSecretEncrypted   String?
+  exotelStatusCallbackUrl       String?
+  incomingVirtualNumbers        String[] @default([])
+  transferDestinations          Json?
+  emergencyDestinations         String[] @default(["+919606654032"])
+  
+  // AI Settings
+  aiEnabled                     Boolean  @default(true)
+  defaultSttModel               String   @default("saaras:v4")
+  defaultLlmModel               String   @default("sarvam-105b-conversations")
+  defaultTtsModel               String   @default("bulbul:v3")
+  defaultSpeaker                String   @default("kavitha")
+  defaultSpeakingPace           Float    @default(1.15)
+  aiSilenceTimeoutMs            Int      @default(400)
+  maxCallDurationSeconds        Int      @default(600)
+  
+  // Business Settings
+  businessHours                 Json?
+  afterHoursBehavior            String   @default("AI_VOICEBOT")
+  emergencyEscalationPolicy     Json?
+  
+  lastUpdatedBy                 String
+  updatedAt                     DateTime @updatedAt
+  createdAt                     DateTime @default(now())
+
+  @@index([hospitalId])
+}
+
+model HospitalConfigVersion {
+  id                  String   @id @default(cuid())
+  hospitalId          String
+  versionNumber       Int
+  isActive            Boolean  @default(false)
+  changelog           String?
+  publishedBy         String
+  publishedAt         DateTime @default(now())
+  
+  // Complete Snapshot (JSON)
+  configSnapshot      Json
+  
+  createdAt           DateTime @default(now())
+
+  @@unique([hospitalId, versionNumber])
+  @@index([hospitalId, isActive])
+}
+
+model ConfigAuditLog {
+  id             String   @id @default(cuid())
+  hospitalId     String
+  entityType     String   // HOSPITAL_CONFIG, AI_AGENT, TELEPHONY_PROVIDER
+  entityId       String
+  action         String   // DRAFT_SAVED, PUBLISHED, ROLLED_BACK, CREDENTIALS_UPDATED
+  performedBy    String
+  userId         String?
+  changesSummary String?
+  oldValueJson   String?
+  newValueJson   String?
+  timestamp      DateTime @default(now())
+
+  @@index([hospitalId, timestamp])
+  @@index([entityType, entityId])
+}
+
+model DurableIdempotencyRecord {
+  id              String   @id @default(cuid())
+  hospitalId      String
+  idempotencyKey  String
+  resourceType    String   // OUTBOUND_CALL, AGENT_UPDATE, CONFIG_PUBLISH
+  callSid         String?
+  callId          String?
+  status          String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  responseJson    String?
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  @@unique([hospitalId, idempotencyKey])
+  @@index([hospitalId, resourceType])
+  @@index([expiresAt])
+}
+
+model DurableRateLimitBucket {
+  id          String   @id @default(cuid())
+  hospitalId  String
+  bucketKey   String   // outbound_calls, voice_preview, agent_test
+  count       Int      @default(1)
+  windowStart DateTime @default(now())
+  windowEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([hospitalId, bucketKey])
+  @@index([hospitalId, windowEnd])
+}
+
+// ----------------------------------------------------
+// 10. AI AGENTS (PHASE 3)
+// ----------------------------------------------------
+
+enum AgentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  DISABLED
+}
+
+model AiAgent {
+  id                      String       @id @default(cuid())
+  hospitalId              String
+  name                    String
+  description             String?
+  purpose                 String       // RECEPTIONIST, APPOINTMENT_BOOKING, DEPARTMENT_ENQUIRY, AFTER_HOURS, OUTBOUND_REMINDER
+  status                  AgentStatus  @default(DRAFT)
+  isDefault               Boolean      @default(false)
+  currentVersion          Int          @default(1)
+  
+  // Model & Voice Config
+  sttModel                String       @default("saaras:v4")
+  llmModel                String       @default("sarvam-105b-conversations")
+  ttsModel                String       @default("bulbul:v3")
+  speaker                 String       @default("kavitha")
+  speakingPace            Float        @default(1.15)
+  defaultLanguage         String       @default("ml-IN")
+  supportedLanguages      String[]     @default(["ml-IN", "en-IN"])
+  
+  // Conversation & Prompt Config
+  greetingMalayalam       String       @default("നമസ്കാരം, ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ ദയ എഐ അസിസ്റ്റന്റാണ്. എനിക്ക് എങ്ങനെ സഹായിക്കാനാകും?")
+  greetingEnglish         String       @default("Hello, welcome to Daya Hospital. I am the AI assistant. How may I help you today?")
+  systemPrompt            String
+  promptSections          Json?
+  personalityTone         String       @default("EMPATHETIC_PROFESSIONAL")
+  responseLength          String       @default("CONCISE")
+  languageSwitchMode      String       @default("AUTO_DETECT")
+  humanHandoffInstruction String?
+  
+  // Call Timing & Behaviour
+  maxDurationSeconds      Int          @default(600)
+  silenceTimeoutMs        Int          @default(400)
+  noInputBehavior         String       @default("PROMPT_AGAIN")
+  fallbackBehavior        String       @default("TRANSFER_CASUALTY")
+  
+  lastUpdatedBy           String
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  versions                AiAgentVersion[]
+
+  @@index([hospitalId, status])
+  @@index([hospitalId, purpose])
+}
+
+model AiAgentVersion {
+  id                  String       @id @default(cuid())
+  agentId             String
+  versionNumber       Int
+  status              AgentStatus  @default(PUBLISHED)
+  changelog           String?
+  snapshotJson        Json
+  publishedBy         String
+  publishedAt         DateTime     @default(now())
+
+  agent               AiAgent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, versionNumber])
+  @@index([agentId, versionNumber])
+}

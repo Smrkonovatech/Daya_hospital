@@ -8,6 +8,7 @@ import {
   PhoneCall,
   Activity,
   BookOpen,
+  Bot,
   Settings,
   Bell,
 } from "lucide-react";
@@ -43,6 +44,12 @@ const NAV_ITEMS: NavItem[] = [
     href: "/actions",
     badge: "9",
     badgeVariant: "warning",
+  },
+  {
+    label: "AI Voice Agents",
+    shortLabel: "Agents",
+    icon: Bot,
+    href: "/agents",
   },
   {
     label: "Knowledge Base",

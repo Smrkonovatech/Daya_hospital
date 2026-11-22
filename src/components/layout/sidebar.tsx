@@ -9,6 +9,7 @@ import {
   PhoneCall,
   Activity,
   BookOpen,
+  Bot,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -47,6 +48,13 @@ const navItems = [
     icon: Activity,
     badge: "9 alert",
     badgeVariant: "warning" as const,
+  },
+  {
+    name: "AI Voice Agents",
+    href: "/agents",
+    icon: Bot,
+    badge: "Sarvam",
+    badgeVariant: "teal" as const,
   },
   {
     name: "Knowledge Base",

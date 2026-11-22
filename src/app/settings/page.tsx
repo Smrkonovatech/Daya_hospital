@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   User,
   Shield,
@@ -18,6 +19,7 @@ import {
   KeyRound,
   Server,
   Info,
+  Clock,
 } from "lucide-react";
 import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -399,6 +401,10 @@ export default function SettingsPage() {
             <TabsTrigger value="notifications">Notifications & Alerts</TabsTrigger>
             <TabsTrigger value="privacy">Call Recording & Privacy</TabsTrigger>
             <TabsTrigger value="status">System Status & Gateways</TabsTrigger>
+            <TabsTrigger value="telephony">Telephony Provider (Exotel)</TabsTrigger>
+            <TabsTrigger value="ai_provider">AI Provider (Sarvam)</TabsTrigger>
+            <TabsTrigger value="business">Business Hours & Escalation</TabsTrigger>
+            <TabsTrigger value="versions">Configuration Versions</TabsTrigger>
           </TabsList>
 
           {/* TAB 1: MY PROFILE */}
@@ -1030,6 +1036,197 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* TAB 6: TELEPHONY PROVIDER (EXOTEL) */}
+          <TabsContent value="telephony">
+            <div className="space-y-5">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <Radio className="h-4 w-4 text-[#0C5DB8]" />
+                    <span>Exotel Telephony Cloud Integration</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Official Exotel Singapore region (api.exotel.com) connectivity for Daya Hospital.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
+                      <span className="text-slate-500 font-medium">Account SID</span>
+                      <p className="font-mono font-bold text-slate-900">smrkonova1</p>
+                      <span className="text-[10px] text-slate-400">Singapore Region (api.exotel.com)</span>
+                    </div>
+                    <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
+                      <span className="text-slate-500 font-medium">Primary Virtual ExoPhone</span>
+                      <p className="font-mono font-bold text-slate-900">08047291658</p>
+                      <span className="text-[10px] text-emerald-600 font-medium">● Connected & Active</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl border border-slate-200 bg-white space-y-2">
+                    <h4 className="font-semibold text-slate-900">Verified Telephony Capabilities</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>Outbound Programmable Calling (api.exotel.com/v1)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>AgentStream Bidirectional WebSocket (Voicebot App ID 1393239)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>Call Status Callbacks with HMAC Verification</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>Casualty & Reception Transfer (Connect Applet)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Info className="h-4 w-4 text-blue-600 shrink-0" />
+                        <span>IVR App Bazaar Flows (Managed via Exotel Dashboard)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Info className="h-4 w-4 text-blue-600 shrink-0" />
+                        <span>Virtual Number Provisioning (Account Manager)</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* TAB 7: AI PROVIDER (SARVAM) */}
+          <TabsContent value="ai_provider">
+            <div className="space-y-5">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-[#0C5DB8]" />
+                    <span>Sarvam AI Speech & Conversational Stack</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Authoritative AI stack powering real-time Malayalam & Indian English voice reception.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+                      <span className="text-slate-500 font-medium">Real-Time STT</span>
+                      <p className="font-bold text-slate-900">Saaras v4</p>
+                      <p className="text-[10px] text-slate-500">8000 Hz linear16 Streaming WebSocket</p>
+                    </div>
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+                      <span className="text-slate-500 font-medium">Conversational LLM</span>
+                      <p className="font-bold text-slate-900">Sarvam 105B</p>
+                      <p className="text-[10px] text-slate-500">Tuned for Indian Multilingual Healthcare</p>
+                    </div>
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+                      <span className="text-slate-500 font-medium">Neural Telephony TTS</span>
+                      <p className="font-bold text-slate-900">Bulbul v3</p>
+                      <p className="text-[10px] text-slate-500">Speaker: Kavitha (Malayalam Female)</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-slate-900">Specialized AI Voice Agents</h4>
+                      <p className="text-slate-600 text-[11px]">
+                        Configure voices, clinical prompts, and test playground turns in the Agent Builder.
+                      </p>
+                    </div>
+                    <Link href="/agents">
+                      <Button size="sm" variant="default" className="text-xs">
+                        Open Voice Agent Builder
+                      </Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* TAB 8: BUSINESS HOURS & ESCALATION */}
+          <TabsContent value="business">
+            <div className="space-y-5">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-[#0C5DB8]" />
+                    <span>Business Hours & Clinical Emergency Escalation</span>
+                  </CardTitle>
+                  <CardDescription>
+                    Operating schedules, after-hours AI fallback, and emergency Casualty handoff routing.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
+                      <h4 className="font-semibold text-slate-900">Daya Hospital OPD Hours</h4>
+                      <div className="space-y-1 text-[11px] text-slate-600">
+                        <div className="flex justify-between">
+                          <span>Monday – Friday:</span>
+                          <span className="font-medium text-slate-900">08:00 AM – 08:00 PM</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Saturday:</span>
+                          <span className="font-medium text-slate-900">08:00 AM – 06:00 PM</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Sunday:</span>
+                          <span className="font-medium text-slate-900">09:00 AM – 02:00 PM</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-red-200 bg-red-50/40 space-y-2">
+                      <h4 className="font-semibold text-red-900">Protected Casualty Emergency</h4>
+                      <div className="space-y-1 text-[11px] text-red-800">
+                        <p>Hotline: <strong>+91 96066 54032</strong> (24/7)</p>
+                        <p>Extension: <strong>100</strong> (Casualty Desk)</p>
+                        <p className="text-[10px] text-red-700 pt-1">
+                          Protected destination: automated marketing or promotional calls are blocked from dialing this number.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* TAB 9: CONFIGURATION VERSIONS */}
+          <TabsContent value="versions">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold flex items-center gap-2">
+                  <Database className="h-4 w-4 text-[#0C5DB8]" />
+                  <span>Immutable Configuration History</span>
+                </CardTitle>
+                <CardDescription>
+                  Review published versions of the hospital calling platform and rollback safely.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-[#0C5DB8]">Active Version: v2</span>
+                    <p className="text-slate-500 text-[11px]">Published: 22 Nov 2026, 11:30 AM IST</p>
+                  </div>
+                  <Badge variant="default">Currently Active</Badge>
+                </div>
+                <div className="p-3 rounded-lg border border-slate-200 bg-white flex items-center justify-between opacity-80">
+                  <div>
+                    <span className="font-bold text-slate-700">Archived Version: v1</span>
+                    <p className="text-slate-400 text-[11px]">Initial Phase 1 baseline</p>
+                  </div>
+                  <Badge variant="secondary">Archived</Badge>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

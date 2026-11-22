@@ -33,6 +33,7 @@ import { callsService } from "@/lib/services/calls-service";
 import { systemRepository } from "@/lib/repositories/system-repository";
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
 import { CallRecord, CallStatus, IntentCategory, CallLanguage } from "@/types";
+import { durableConcurrencyService } from "./durable-concurrency";
 
 export interface StandardOutboundCallParams {
   hospitalId: string;
@@ -260,57 +261,42 @@ export class ExotelTelephonyService {
       };
     }
 
-    // 4. Idempotency & Duplicate Call Prevention
+    // 4. Durable Idempotency & Duplicate Call Prevention
     const idempotencyKey = params.idempotencyKey?.trim();
     if (idempotencyKey) {
-      // Check in-memory fast cache
-      const cached = idempotencyCache.get(idempotencyKey);
-      if (cached && Date.now() - cached.timestamp < 15 * 60 * 1000) {
+      const reservation = await durableConcurrencyService.acquireIdempotencyReservation(
+        hospitalId,
+        idempotencyKey,
+        "OUTBOUND_CALL",
+        30
+      );
+
+      if (!reservation.isFirstAcquisition) {
+        if (reservation.cachedResponse) {
+          return {
+            ...(reservation.cachedResponse as unknown as StandardOutboundCallResult),
+            isDuplicateReplay: true,
+          };
+        }
         return {
-          ...cached.result,
+          success: true,
+          callId: reservation.callId || `call_cached_${Date.now()}`,
+          callSid: reservation.callSid || "exo_call_cached",
+          hospitalId,
+          patientId: params.patientId,
+          phoneNumber: phoneNorm.e164,
+          purpose: params.purpose,
+          mode: params.mode || "AI",
+          status: "INITIATED",
+          correlationId,
+          createdAt: nowIso,
           isDuplicateReplay: true,
         };
       }
-
-      // Check DB for recent call with this idempotency key
-      const dbStatus = await checkDatabaseConnection();
-      if (dbStatus.connected) {
-        try {
-          const existingAction = await prisma.aiAction.findUnique({
-            where: { idempotencyKey },
-            include: { call: true },
-          });
-          if (existingAction && existingAction.call) {
-            const result: StandardOutboundCallResult = {
-              success: true,
-              callId: existingAction.call.id,
-              callSid: existingAction.call.externalCallId || "",
-              hospitalId: existingAction.call.hospitalId,
-              patientId: params.patientId,
-              phoneNumber: phoneNorm.e164,
-              purpose: params.purpose,
-              mode: params.mode || "AI",
-              status: existingAction.call.callStatus,
-              correlationId,
-              createdAt: existingAction.call.startTime.toISOString(),
-              isDuplicateReplay: true,
-            };
-            idempotencyCache.set(idempotencyKey, {
-              callId: result.callId,
-              callSid: result.callSid,
-              result,
-              timestamp: Date.now(),
-            });
-            return result;
-          }
-        } catch {
-          // Fall through on DB error
-        }
-      }
     }
 
-    // 5. Rate Limiting Check
-    const rateLimit = this.checkRateLimit(hospitalId);
+    // 5. Durable Rate Limiting Check (Max 10 calls/min per hospital)
+    const rateLimit = await durableConcurrencyService.checkRateLimit(hospitalId, "outbound_calls", 10, 60);
     if (!rateLimit.allowed) {
       return {
         success: false,
@@ -445,6 +431,12 @@ export class ExotelTelephonyService {
     };
 
     if (idempotencyKey) {
+      await durableConcurrencyService.completeIdempotencyReservation(hospitalId, idempotencyKey, {
+        status: "COMPLETED",
+        callId,
+        callSid: exotelCallSid,
+        responseJson: finalResult as unknown as Record<string, unknown>,
+      });
       idempotencyCache.set(idempotencyKey, {
         callId,
         callSid: exotelCallSid,

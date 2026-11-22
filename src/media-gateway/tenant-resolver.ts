@@ -32,6 +32,8 @@ export interface TenantResolutionResult {
   verified: boolean;
   resolutionSource: "PHONE_NUMBER" | "ACCOUNT_SID" | "VALIDATED_CUSTOM_FIELD" | "DEFAULT_FALLBACK";
   warning?: string;
+  publishedConfigVersion?: number;
+  assignedAgentId?: string;
 }
 
 export class TenantResolver {
