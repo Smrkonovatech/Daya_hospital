@@ -18,6 +18,12 @@ export { MockTelephonyIvrAdapter } from "./ivr/mock-adapter";
 export { TelephonyIvrClient } from "./ivr/telephony-client";
 export { BitVoiceTelephonyAdapter } from "./telephony/bitvoice-adapter";
 export { ExotelTelephonyAdapter } from "./telephony/exotel-adapter";
+export {
+  ExotelTelephonyService,
+  exotelTelephonyService,
+  type StandardOutboundCallParams,
+  type StandardOutboundCallResult,
+} from "@/lib/services/exotel-telephony-service";
 export type {
   InboundCallEvent,
   CallStatusUpdateEvent,
