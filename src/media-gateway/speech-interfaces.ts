@@ -14,6 +14,8 @@ export interface TranscriptTurnResult {
   language: string;
   confidence: number;
   timestampMs: number;
+  lastCallerAudioMs?: number;
+  speechEndVadMs?: number;
 }
 
 /**

@@ -51,7 +51,7 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
         speech_sample_rate: 8000,
         model: this.config.ttsModel || "bulbul:v3",
         enable_preprocessing: true,
-        pace: options?.pace || 1.0,
+        pace: options?.pace || this.config.ttsPace || 1.15,
       };
 
       const res = await fetch(endpoint, {

@@ -65,6 +65,12 @@ export class AgentStreamMediaGateway {
           process.env.EXOTEL_ECHO_MODE === "true"),
       autoPlayGreeting:
         options?.autoPlayGreeting ?? process.env.GATEWAY_AUTO_PLAY_GREETING !== "false",
+      silenceTimeoutMs:
+        options?.silenceTimeoutMs ??
+        (process.env.STT_SILENCE_TIMEOUT_MS ? Number(process.env.STT_SILENCE_TIMEOUT_MS) : 400),
+      ttsPace:
+        options?.ttsPace ??
+        (process.env.SARVAM_TTS_PACE ? Number(process.env.SARVAM_TTS_PACE) : 1.15),
     };
 
     // 1. Create native HTTP server with /health and /status endpoints
@@ -88,15 +94,24 @@ export class AgentStreamMediaGateway {
 
       if (url.pathname === "/" || url.pathname === "/status") {
         res.writeHead(200, { "Content-Type": "application/json" });
+        const includeDetailedMetrics = url.searchParams.get("metrics") === "true";
         res.end(
           JSON.stringify({
             name: "Smrkomed Exotel Voicebot Media Gateway",
-            version: "1.1.0",
+            version: "1.2.0",
             status: "ONLINE",
             streamingPath: this.config.path,
             echoMode: this.config.echoMode,
             autoPlayGreeting: this.config.autoPlayGreeting,
+            silenceTimeoutMs: this.config.silenceTimeoutMs,
+            ttsPace: this.config.ttsPace,
             sarvamAi: getSarvamConfigSummary(),
+            latencyTelemetry: {
+              aggregates: mediaSessionManager.getAggregateLatencyStats(),
+              recentTurnMetrics: mediaSessionManager.getRecentTurnMetrics(
+                includeDetailedMetrics ? 50 : 10
+              ),
+            },
             activeSessions: mediaSessionManager.getAllActiveSessions().map((s) => s.getSummary()),
             recentCompletedCalls: mediaSessionManager.getRecentCompletedSessions(),
             recentUpgrades: this.recentUpgrades.slice(-25),
@@ -268,6 +283,9 @@ export class AgentStreamMediaGateway {
             const wsUrl = (ws as unknown as { _requestUrl?: URL })._requestUrl;
             const queryEcho = wsUrl?.searchParams.get("echo") === "true";
             const sessionEchoMode = queryEcho || Boolean(this.config.echoMode);
+            const sessionAutoGreeting = sessionEchoMode
+              ? false
+              : (this.config.autoPlayGreeting ?? true);
 
             activeSession = new CallMediaSession({
               streamSid,
@@ -279,8 +297,10 @@ export class AgentStreamMediaGateway {
               mediaFormat,
               socket: ws,
               audioEngine,
-              autoPlayGreeting: this.config.autoPlayGreeting ?? true,
+              autoPlayGreeting: sessionAutoGreeting,
               echoMode: sessionEchoMode,
+              silenceTimeoutMs: this.config.silenceTimeoutMs,
+              ttsPace: this.config.ttsPace,
             });
 
             mediaSessionManager.registerSession(activeSession);

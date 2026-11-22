@@ -21,8 +21,10 @@ export interface SarvamConfig {
   sampleRate: number;
   ttsModel: string;
   ttsSpeaker: string;
+  ttsPace: number;
   chatModel: string;
   languageCode: string;
+  sttSilenceTimeoutMs: number;
 
   // 2. Sarvam Samvaad Voice Agents Platform (indus.sarvam.ai/samvaad)
   samvaadApiKey?: string;
@@ -39,29 +41,18 @@ export interface SarvamConfig {
   mode: "PRODUCTION" | "MOCK_MODE";
 }
 
-export function maskSecret(secret?: string): string {
+export function maskSecret(secret?: string, redactCompletely = true): string {
   if (!secret) return "[NOT_CONFIGURED]";
+  if (redactCompletely) return "[CONFIGURED]";
   if (secret.length <= 8) return "*****";
   return `${secret.slice(0, 5)}...${secret.slice(-4)}`;
 }
 
 export function getSarvamConfig(overrides?: Partial<SarvamConfig>): SarvamConfig {
-  const apiKey =
-    overrides?.apiKey ||
-    process.env.SARVAM_API_KEY ||
-    "sk_l0nfgdq0_MRxkA28Stuh6JXP2AE4Anbcp";
-  const samvaadApiKey =
-    overrides?.samvaadApiKey ||
-    process.env.SARVAM_SAMVAAD_API_KEY ||
-    "sk_samvaad_xywpvl90_4qRfmMh1fcGrL9XcM48TdBbF";
-  const orgId =
-    overrides?.orgId ||
-    process.env.SARVAM_ORG_ID ||
-    "01a06777-00d4-7317-835c-507054052514";
-  const workspaceId =
-    overrides?.workspaceId ||
-    process.env.SARVAM_WORKSPACE_ID ||
-    "01a06777-00da-7f77-abe3-dc1fc871a5ab";
+  const apiKey = overrides?.apiKey || process.env.SARVAM_API_KEY || "";
+  const samvaadApiKey = overrides?.samvaadApiKey || process.env.SARVAM_SAMVAAD_API_KEY || "";
+  const orgId = overrides?.orgId || process.env.SARVAM_ORG_ID;
+  const workspaceId = overrides?.workspaceId || process.env.SARVAM_WORKSPACE_ID;
   const appId = overrides?.appId || process.env.SARVAM_APP_ID;
   const appVersion = overrides?.appVersion || process.env.SARVAM_APP_VERSION;
   const connectionId = overrides?.connectionId || process.env.SARVAM_CONNECTION_ID;
@@ -81,8 +72,13 @@ export function getSarvamConfig(overrides?: Partial<SarvamConfig>): SarvamConfig
     sampleRate: overrides?.sampleRate || Number(process.env.SARVAM_SAMPLE_RATE) || 8000,
     ttsModel: overrides?.ttsModel || process.env.SARVAM_TTS_MODEL || "bulbul:v3",
     ttsSpeaker: overrides?.ttsSpeaker || process.env.SARVAM_TTS_SPEAKER || "kavitha",
+    ttsPace: overrides?.ttsPace || Number(process.env.SARVAM_TTS_PACE) || 1.15,
     chatModel: overrides?.chatModel || process.env.SARVAM_CHAT_MODEL || "sarvam-105b-conversations",
     languageCode: overrides?.languageCode || process.env.SARVAM_LANGUAGE_CODE || "ml-IN",
+    sttSilenceTimeoutMs:
+      overrides?.sttSilenceTimeoutMs ||
+      Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS) ||
+      400,
 
     samvaadApiKey: samvaadApiKey || undefined,
     orgId,
@@ -103,9 +99,9 @@ export function getSarvamTelemetrySummary(config: SarvamConfig) {
     configured: config.isConfigured,
     mode: config.mode,
     speechApiConfigured: config.isConfigured,
-    speechApiKeyMasked: maskSecret(config.apiKey),
+    speechApiKeyMasked: maskSecret(config.apiKey, true),
     samvaadConfigured: config.hasSamvaadConfig,
-    samvaadApiKeyMasked: maskSecret(config.samvaadApiKey),
+    samvaadApiKeyMasked: maskSecret(config.samvaadApiKey, true),
     orgId: config.orgId || null,
     workspaceId: config.workspaceId || null,
     appId: config.appId || null,
@@ -116,7 +112,9 @@ export function getSarvamTelemetrySummary(config: SarvamConfig) {
     sampleRate: config.sampleRate,
     ttsModel: config.ttsModel,
     ttsSpeaker: config.ttsSpeaker,
+    ttsPace: config.ttsPace,
     languageCode: config.languageCode,
+    sttSilenceTimeoutMs: config.sttSilenceTimeoutMs,
   };
 }
 

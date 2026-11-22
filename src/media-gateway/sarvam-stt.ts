@@ -32,6 +32,7 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
   private isConnecting = false;
   private transcriptCallback?: (turn: TranscriptTurnResult) => void;
   private speechStartCallback?: () => void;
+  private speechEndCallback?: (vadTimestampMs: number) => void;
 
   private languageCode: string;
   private model: string;
@@ -42,6 +43,7 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
   // Utterance tracking & VAD state
   private isSpeaking = false;
   private lastSpeechTimestamp = 0;
+  private lastCallerAudioReceivedTimestamp = 0;
   private silenceTimer: NodeJS.Timeout | null = null;
   private accumulatedPcmChunks: Buffer[] = [];
   private currentTurnText = "";
@@ -52,7 +54,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
     this.model = options?.model || this.config.sttModel || "saaras:v4";
     this.sampleRate = options?.sampleRate || 8000;
     this.vadThreshold = options?.vadThreshold ?? 400;
-    this.silenceTimeoutMs = options?.silenceTimeoutMs ?? 1000;
+    this.silenceTimeoutMs =
+      options?.silenceTimeoutMs ?? this.config.sttSilenceTimeoutMs ?? 400;
   }
 
   /**
@@ -126,6 +129,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
   public async sendAudio(audioChunk: Buffer): Promise<void> {
     if (!audioChunk || audioChunk.length === 0) return;
 
+    this.lastCallerAudioReceivedTimestamp = Date.now();
+
     // 1. Local Energy-based Voice Activity Detection (VAD)
     const rms = this.calculateRms(audioChunk);
     const speechDetected = rms > this.vadThreshold;
@@ -152,7 +157,11 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
 
       if (!this.silenceTimer) {
         this.silenceTimer = setTimeout(() => {
-          this.finalizeUtterance();
+          const speechEndVadMs = this.lastSpeechTimestamp || Date.now();
+          if (this.speechEndCallback) {
+            this.speechEndCallback(speechEndVadMs);
+          }
+          this.finalizeUtterance(this.lastCallerAudioReceivedTimestamp, speechEndVadMs);
         }, this.silenceTimeoutMs);
       }
     }
@@ -175,6 +184,13 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
    */
   public onTranscript(callback: (turn: TranscriptTurnResult) => void): void {
     this.transcriptCallback = callback;
+  }
+
+  /**
+   * Registers callback when caller speech finishes (triggers speech-end telemetry).
+   */
+  public onSpeechEnd(callback: (vadTimestampMs: number) => void): void {
+    this.speechEndCallback = callback;
   }
 
   /**
@@ -274,7 +290,11 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
 
       // 4. Speech end detected by Sarvam
       if (parsed.event === "speech.end") {
-        this.finalizeUtterance();
+        const vadMs = this.lastSpeechTimestamp || Date.now();
+        if (this.speechEndCallback) {
+          this.speechEndCallback(vadMs);
+        }
+        this.finalizeUtterance(this.lastCallerAudioReceivedTimestamp, vadMs);
       }
     } catch {
       // Ignore unparseable frames
@@ -284,7 +304,10 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
   /**
    * Finalizes the current utterance turn when silence or speech.end is detected.
    */
-  private async finalizeUtterance(): Promise<void> {
+  private async finalizeUtterance(
+    lastCallerAudioMs?: number,
+    speechEndVadMs?: number
+  ): Promise<void> {
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
@@ -305,6 +328,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
           language: this.languageCode,
           confidence: 0.98,
           timestampMs: Date.now(),
+          lastCallerAudioMs: lastCallerAudioMs || this.lastCallerAudioReceivedTimestamp,
+          speechEndVadMs: speechEndVadMs || this.lastSpeechTimestamp || Date.now(),
         });
       }
       return;
@@ -323,6 +348,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
           language: this.languageCode,
           confidence: 0.92,
           timestampMs: Date.now(),
+          lastCallerAudioMs: lastCallerAudioMs || this.lastCallerAudioReceivedTimestamp,
+          speechEndVadMs: speechEndVadMs || this.lastSpeechTimestamp || Date.now(),
         });
       }
     } else {

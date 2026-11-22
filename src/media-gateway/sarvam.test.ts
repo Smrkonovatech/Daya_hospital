@@ -21,7 +21,7 @@ import {
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { SarvamSpeechToTextProvider } from "./sarvam-stt";
 import { HospitalConversationEngine } from "./conversation-engine";
-import { CallMediaSession } from "./session-manager";
+import { CallMediaSession, MediaSessionManager } from "./session-manager";
 import {
   DAYA_HOSPITAL_CONFIG,
   resolveHospitalByPhoneNumber,
@@ -30,21 +30,23 @@ import { tenantResolver } from "./tenant-resolver";
 import { TextToSpeechProvider, SpeechToTextProvider, TranscriptTurnResult } from "./speech-interfaces";
 
 describe("Sarvam Configuration & Secret Masking", () => {
-  it("safely masks secret credentials while revealing prefix and suffix", () => {
-    expect(maskSecret("sk_l0nfgdq0_MRxkA28Stuh6JXP2AE4Anbcp")).toBe("sk_l0...nbcp");
-    expect(maskSecret("sk_samvaad_xywpvl90_4qRfmMh1fcGrL9XcM48TdBbF")).toBe("sk_sa...dBbF");
-    expect(maskSecret("short")).toBe("*****");
+  it("safely masks secret credentials without leaking raw keys, prefixes, or suffixes", () => {
+    expect(maskSecret("sk_l0nfgdq0_MRxkA28Stuh6JXP2AE4Anbcp")).toBe("[CONFIGURED]");
+    expect(maskSecret("sk_samvaad_xywpvl90_4qRfmMh1fcGrL9XcM48TdBbF")).toBe("[CONFIGURED]");
+    expect(maskSecret("short")).toBe("[CONFIGURED]");
     expect(maskSecret(undefined)).toBe("[NOT_CONFIGURED]");
     expect(maskSecret("")).toBe("[NOT_CONFIGURED]");
   });
 
-  it("loads config with production defaults", () => {
+  it("loads config with production defaults including optimized 400ms silence timeout and 1.15 pace", () => {
     const config = getSarvamConfig();
     expect(config.languageCode).toBe("ml-IN");
     expect(config.sampleRate).toBe(8000);
     expect(config.sttModel).toBe("saaras:v4");
     expect(config.ttsModel).toBe("bulbul:v3");
     expect(config.ttsSpeaker).toBe("kavitha");
+    expect(config.sttSilenceTimeoutMs).toBe(400);
+    expect(config.ttsPace).toBe(1.15);
   });
 
   it("produces safe telemetry summary without leaking raw keys", () => {
@@ -332,10 +334,20 @@ describe("CallMediaSession AI Voice Pipeline Integration", () => {
     expect(session.conversationTurns[0].speaker).toBe("ai");
     expect(session.conversationTurns[0].text).toContain("കാഷ്വാലിറ്റി");
 
+    // Verify turn latency telemetry was recorded
+    expect(session.turnLatencyMetrics.length).toBe(1);
+    const turn1 = session.turnLatencyMetrics[0];
+    expect(turn1.turnId).toBe(1);
+    expect(turn1.timestamps.speechEndVadMs).toBeGreaterThan(0);
+    expect(turn1.timestamps.finalTranscriptMs).toBeGreaterThan(0);
+    expect(turn1.latencies.totalSpeechEndToAudibleResponseMs).toBeGreaterThanOrEqual(0);
+
     const summary = session.getSummary();
     expect(summary.turnCount).toBe(1);
     expect(summary.detectedLanguage).toBe("ml-IN");
     expect(summary.lastAiResponse).toContain("കാഷ്വാലിറ്റി");
+    expect(summary.recentTurnMetrics.length).toBe(1);
+    expect(summary.lastTurnLatencyMs).toBeGreaterThanOrEqual(0);
   });
 
   it("handles barge-in: when caller speaks during playback, Exotel clear event is dispatched immediately", () => {
@@ -403,5 +415,50 @@ describe("Multi-Hospital Tenant Resolution (08047291658 & Aliases)", () => {
     expect(result.verified).toBe(true);
     expect(result.hospitalId).toBe("hosp_daya_thrissur");
     expect(result.resolutionSource).toBe("PHONE_NUMBER");
+  });
+});
+
+describe("Turn Latency Telemetry & Ring Buffer Statistics", () => {
+  it("calculates median and p95 across recorded turn metrics", () => {
+    const sessionManager = new MediaSessionManager();
+    expect(sessionManager.getAggregateLatencyStats().totalTurns).toBe(0);
+
+    for (let i = 1; i <= 5; i++) {
+      sessionManager.recordTurnMetrics({
+        turnId: i,
+        callSid: `CA_${i}`,
+        streamSid: `MZ_${i}`,
+        callerTranscript: "ഹലോ",
+        aiResponseText: "നമസ്കാരം",
+        timestamps: {
+          lastCallerAudioMs: 1000,
+          speechEndVadMs: 1400,
+          finalTranscriptMs: 1650,
+          llmStartMs: 1650,
+          llmFirstTokenMs: 2200,
+          llmResponseReadyMs: 2350,
+          ttsStartMs: 2350,
+          ttsFirstAudioMs: 2850,
+          firstAudioSentToExotelMs: 2860,
+          lastAudioSentToExotelMs: 3500,
+        },
+        latencies: {
+          speechEndToTranscriptMs: 250,
+          transcriptToLlmFirstTokenMs: 550,
+          llmFirstTokenToTtsAudioMs: 650,
+          ttsFirstAudioMs: 500,
+          totalSpeechEndToAudibleResponseMs: 1460,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const stats = sessionManager.getAggregateLatencyStats();
+    expect(stats.totalTurns).toBe(5);
+    expect(stats.medianTotalLatencyMs).toBe(1460);
+    expect(stats.medianSttLatencyMs).toBe(250);
+    expect(stats.medianLlmLatencyMs).toBe(550);
+    expect(stats.medianTtsLatencyMs).toBe(500);
+    expect(stats.p95TotalLatencyMs).toBe(1460);
   });
 });

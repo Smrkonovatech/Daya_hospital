@@ -26,6 +26,7 @@ export interface ConversationTurn {
 
 export interface ConversationResult {
   replyText: string;
+  firstSentenceText?: string;
   intent: "GREETING" | "APPOINTMENT" | "DOCTOR_INFO" | "FEES" | "CASUALTY" | "STAFF_TRANSFER" | "GENERAL";
   shouldTransfer: boolean;
   transferDestination?: string;
@@ -35,6 +36,11 @@ export interface ConversationResult {
     doctorName?: string;
     preferredDate?: string;
     preferredTime?: string;
+  };
+  llmTimestamps?: {
+    llmStartMs: number;
+    llmFirstTokenMs?: number;
+    llmResponseReadyMs: number;
   };
 }
 
@@ -68,19 +74,33 @@ export class HospitalConversationEngine {
 
   /**
    * Processes a transcribed caller utterance and produces a polite Malayalam response.
+   * Supports optional onFirstSentenceChunk callback for early-start streaming TTS.
    */
-  public async processCallerUtterance(callerText: string): Promise<ConversationResult> {
+  public async processCallerUtterance(
+    callerText: string,
+    onFirstSentenceChunk?: (sentence: string) => void
+  ): Promise<ConversationResult> {
     const text = (callerText || "").trim();
     this.turnCount++;
     this.history.push({ role: "user", content: text, timestamp: Date.now() });
 
+    const tImmediate = Date.now();
+    const immediateTimestamps = {
+      llmStartMs: tImmediate,
+      llmFirstTokenMs: tImmediate,
+      llmResponseReadyMs: tImmediate,
+    };
+
     if (!text) {
       const defaultPrompt = "ദയവായി താങ്കൾക്ക് എന്ത് സഹായമാണ് വേണ്ടതെന്ന് പറയാമോ?";
       this.history.push({ role: "assistant", content: defaultPrompt, timestamp: Date.now() });
+      if (onFirstSentenceChunk) onFirstSentenceChunk(defaultPrompt);
       return {
         replyText: defaultPrompt,
+        firstSentenceText: defaultPrompt,
         intent: "GENERAL",
         shouldTransfer: false,
+        llmTimestamps: immediateTimestamps,
       };
     }
 
@@ -95,11 +115,14 @@ export class HospitalConversationEngine {
       const reply = `ഇതൊരു അത്യാഹിത സാഹചര്യമായതിനാൽ ഞാൻ കാഷ്വാലിറ്റി എമർജൻസി ഡെസ്കിലേക്ക് കണക്ട് ചെയ്യുകയാണ്. ദയവായി ലൈനിൽ തുടരുക, അല്ലെങ്കിൽ ${casualtyNumber} എന്ന നമ്പറിൽ ഉടൻ ബന്ധപ്പെടുക.`;
 
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
+      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
       return {
         replyText: reply,
+        firstSentenceText: reply,
         intent: "CASUALTY",
         shouldTransfer: true,
         transferDestination: this.hospitalConfig.routing.casualtyExtension || "100",
+        llmTimestamps: immediateTimestamps,
       };
     }
 
@@ -110,11 +133,14 @@ export class HospitalConversationEngine {
       const reply =
         "തീർച്ചയായും, ഞാൻ ഇപ്പോൾ തന്നെ ഹോസ്പിറ്റൽ ഫ്രണ്ട് ഡെസ്ക് സ്റ്റാഫിലേക്ക് കോൾ ട്രാൻസ്ഫർ ചെയ്യാം. ദയവായി ലൈനിൽ തുടരുക.";
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
+      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
       return {
         replyText: reply,
+        firstSentenceText: reply,
         intent: "STAFF_TRANSFER",
         shouldTransfer: true,
         transferDestination: "201",
+        llmTimestamps: immediateTimestamps,
       };
     }
 
@@ -128,7 +154,12 @@ export class HospitalConversationEngine {
         content: appointmentResult.replyText,
         timestamp: Date.now(),
       });
-      return appointmentResult;
+      if (onFirstSentenceChunk) onFirstSentenceChunk(appointmentResult.replyText);
+      return {
+        ...appointmentResult,
+        firstSentenceText: appointmentResult.replyText,
+        llmTimestamps: immediateTimestamps,
+      };
     }
 
     // ----------------------------------------------------
@@ -138,10 +169,13 @@ export class HospitalConversationEngine {
       const reply =
         "ദയ ഹോസ്പിറ്റലിൽ പുതിയ പേഷ്യന്റ് രജിസ്ട്രേഷന് 100 രൂപയും, ജനറൽ മെഡിസിൻ ഒപി കൺസൾട്ടേഷന് 250 രൂപയുമാണ്. സ്പെഷ്യലിസ്റ്റ് കൺസൾട്ടേഷൻ ഫീസ് 450 രൂപയും, സൂപ്പർ സ്പെഷ്യാലിറ്റി ഒപി ഫീസ് 600 രൂപയുമാണ്.";
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
+      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
       return {
         replyText: reply,
+        firstSentenceText: reply,
         intent: "FEES",
         shouldTransfer: false,
+        llmTimestamps: immediateTimestamps,
       };
     }
 
@@ -152,31 +186,50 @@ export class HospitalConversationEngine {
       const reply =
         "ദയ ഹോസ്പിറ്റലിൽ കാർഡിയോളജി, ഓർത്തോപീഡിക്സ്, ജനറൽ മെഡിസിൻ, പീഡിയാട്രിക്സ്, ഇഎൻടി, ന്യൂറോളജി എന്നീ വിഭാഗങ്ങൾ പ്രവർത്തിക്കുന്നുണ്ട്. രാവിലെ 9 മണി മുതൽ വൈകുന്നേരം 5 മണി വരെയാണ് ഒപി കൺസൾട്ടേഷൻ സമയം.";
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
+      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
       return {
         replyText: reply,
+        firstSentenceText: reply,
         intent: "DOCTOR_INFO",
         shouldTransfer: false,
+        llmTimestamps: immediateTimestamps,
       };
     }
 
     // ----------------------------------------------------
-    // 6. DYNAMIC MALAYALAM LLM DIALOGUE (SARVAM-105B)
+    // 6. DYNAMIC MALAYALAM LLM STREAMING (SARVAM-105B)
     // ----------------------------------------------------
+    const tStart = Date.now();
     let aiResponse = "";
+    let firstSentence = "";
+    let llmFirstTokenMs: number | undefined;
+
     if (this.sarvamConfig.isConfigured) {
-      aiResponse = await this.querySarvamLlm(text);
+      const llmResult = await this.querySarvamLlm(text, onFirstSentenceChunk);
+      aiResponse = llmResult.fullText;
+      firstSentence = llmResult.firstSentence;
+      llmFirstTokenMs = llmResult.llmFirstTokenMs;
     }
 
     if (!aiResponse) {
       aiResponse =
         "തീർച്ചയായും. ഡോക്ടറെ കാണുന്നതിനായുള്ള അപ്പോയിന്റ്മെന്റ് അല്ലെങ്കിൽ ഹോസ്പിറ്റൽ സേവനങ്ങളെക്കുറിച്ചുള്ള വിവരങ്ങൾക്ക് സഹായിക്കാം. ഏത് വിഭാഗത്തിലാണ് സഹായം വേണ്ടത്?";
+      firstSentence = aiResponse;
+      if (onFirstSentenceChunk) onFirstSentenceChunk(aiResponse);
     }
 
-    this.history.push({ role: "assistant", content: aiResponse, timestamp: Date.now() });
+    const tEnd = Date.now();
+    this.history.push({ role: "assistant", content: aiResponse, timestamp: tEnd });
     return {
       replyText: aiResponse,
+      firstSentenceText: firstSentence || aiResponse,
       intent: "GENERAL",
       shouldTransfer: false,
+      llmTimestamps: {
+        llmStartMs: tStart,
+        llmFirstTokenMs: llmFirstTokenMs || tStart,
+        llmResponseReadyMs: tEnd,
+      },
     };
   }
 
@@ -317,8 +370,21 @@ export class HospitalConversationEngine {
 
   /**
    * Generates dynamic Malayalam conversation using Sarvam's 105B conversation model.
+   * Supports streaming with early first-sentence detection to minimize TTS startup latency.
    */
-  private async querySarvamLlm(userPrompt: string): Promise<string> {
+  private async querySarvamLlm(
+    userPrompt: string,
+    onFirstSentence?: (sentence: string) => void
+  ): Promise<{
+    fullText: string;
+    firstSentence: string;
+    llmStartMs: number;
+    llmFirstTokenMs?: number;
+    llmResponseReadyMs: number;
+  }> {
+    const llmStartMs = Date.now();
+    let llmFirstTokenMs: number | undefined;
+
     try {
       const systemPrompt = `You are the AI Voice Receptionist at ${this.hospitalConfig.hospitalName}, ${this.hospitalConfig.city}, Kerala.
 Rules:
@@ -344,19 +410,79 @@ Rules:
           model: this.sarvamConfig.chatModel || "sarvam-105b-conversations",
           messages,
           temperature: 0.2,
-          max_tokens: 150,
+          max_tokens: 100,
+          stream: true,
         }),
       });
 
-      if (res.ok) {
-        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-        const reply = data.choices?.[0]?.message?.content?.trim();
-        if (reply) return reply;
+      if (res.ok && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+        let firstSentence = "";
+        let firstSentenceSent = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === "data: [DONE]") continue;
+            if (trimmed.startsWith("data: ")) {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6));
+                const delta = parsed.choices?.[0]?.delta?.content || "";
+                if (delta) {
+                  if (!llmFirstTokenMs) {
+                    llmFirstTokenMs = Date.now();
+                  }
+                  fullText += delta;
+
+                  // Detect first sentence boundary for early TTS start
+                  if (!firstSentenceSent && fullText.length >= 8) {
+                    const match = fullText.match(/^([^.!?।\n]+[.!?।\n])/);
+                    if (match && match[1]?.trim()) {
+                      firstSentence = match[1].trim();
+                      firstSentenceSent = true;
+                      if (onFirstSentence) {
+                        onFirstSentence(firstSentence);
+                      }
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+
+        const llmResponseReadyMs = Date.now();
+        const finalFullText = fullText.trim();
+        return {
+          fullText: finalFullText,
+          firstSentence: firstSentence || finalFullText,
+          llmStartMs,
+          llmFirstTokenMs: llmFirstTokenMs || llmResponseReadyMs,
+          llmResponseReadyMs,
+        };
       }
     } catch (err) {
-      console.warn("[ConversationEngine] Sarvam LLM query error:", err);
+      console.warn("[ConversationEngine] Sarvam LLM streaming error:", err);
     }
-    return "";
+
+    const fallbackTime = Date.now();
+    return {
+      fullText: "",
+      firstSentence: "",
+      llmStartMs,
+      llmFirstTokenMs: fallbackTime,
+      llmResponseReadyMs: fallbackTime,
+    };
   }
 
   public getHistory(): ConversationTurn[] {

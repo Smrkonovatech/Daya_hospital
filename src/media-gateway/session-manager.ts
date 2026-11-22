@@ -10,12 +10,14 @@
 
 import { EventEmitter } from "events";
 import {
+  AggregateLatencyStats,
   ExotelMediaChunk,
   ExotelMediaFormat,
   ExotelOutboundClearMessage,
   ExotelOutboundMarkMessage,
   ExotelOutboundMediaMessage,
   SessionState,
+  TurnLatencyMetrics,
 } from "./types";
 import { AudioEngine, AudioPlaybackQueue, defaultAudioEngine } from "./audio-engine";
 import { tenantResolver, TenantResolutionResult } from "./tenant-resolver";
@@ -46,6 +48,8 @@ export interface CallSessionInitOptions {
   hospitalConfig?: HospitalConfig;
   autoPlayGreeting?: boolean;
   echoMode?: boolean;
+  silenceTimeoutMs?: number;
+  ttsPace?: number;
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -78,6 +82,10 @@ export class CallMediaSession extends EventEmitter {
   public lastCallerTranscript?: string;
   public lastAiResponse?: string;
   public conversationTurns: Array<{ speaker: "caller" | "ai"; text: string; timestampMs: number }> = [];
+  public turnLatencyMetrics: TurnLatencyMetrics[] = [];
+  private turnCounter = 0;
+  private lastCallerAudioReceivedMs = 0;
+  private callerSpeechStartMs?: number;
 
   public readonly sttProvider: SpeechToTextProvider;
   public readonly ttsProvider: TextToSpeechProvider;
@@ -123,13 +131,21 @@ export class CallMediaSession extends EventEmitter {
     this.hospitalId = this.tenantResult.hospitalId;
     this.hospitalConfig = options.hospitalConfig || getHospitalConfig(this.hospitalId);
 
-    // AI Components Initialization
+    // AI Components Initialization with low-latency VAD (400ms) & brisk Malayalam TTS pace (1.15)
     this.conversationEngine =
       options.conversationEngine || new HospitalConversationEngine(this.hospitalConfig);
     this.sttProvider =
       options.sttProvider ||
-      new SarvamSpeechToTextProvider({ sampleRate: 8000, languageCode: "ml-IN" });
-    this.ttsProvider = options.ttsProvider || new SarvamTextToSpeechProvider();
+      new SarvamSpeechToTextProvider({
+        sampleRate: 8000,
+        languageCode: "ml-IN",
+        silenceTimeoutMs: options.silenceTimeoutMs ?? 400,
+      });
+    this.ttsProvider =
+      options.ttsProvider ||
+      new SarvamTextToSpeechProvider(
+        options.ttsPace ? { ttsPace: options.ttsPace } : undefined
+      );
 
     this.setupSpeechListeners();
     this.state = "CONNECTED";
@@ -147,13 +163,14 @@ export class CallMediaSession extends EventEmitter {
           timestampMs: turn.timestampMs,
         });
 
-        await this.handleUserTurn(turn.text.trim());
+        await this.handleUserTurn(turn.text.trim(), turn);
       }
     });
 
     if ("onSpeechStart" in this.sttProvider) {
       (this.sttProvider as unknown as { onSpeechStart: (cb: () => void) => void }).onSpeechStart(
         () => {
+          this.callerSpeechStartMs = Date.now();
           if (this.ttsStatus === "PLAYING" || this.playbackQueue.hasPending()) {
             this.interruptPlayback();
           }
@@ -222,12 +239,32 @@ export class CallMediaSession extends EventEmitter {
 
   /**
    * Processes caller's transcribed utterance, queries Conversation Engine, and speaks response.
+   * Records precise turn-by-turn latency metrics across STT VAD, LLM generation, and TTS synthesis.
    */
-  public async handleUserTurn(text: string): Promise<void> {
+  public async handleUserTurn(text: string, turnInfo?: TranscriptTurnResult): Promise<void> {
     if (this.isStopped) return;
 
+    this.turnCounter++;
+    const turnId = this.turnCounter;
+    const finalTranscriptMs = turnInfo?.timestampMs || Date.now();
+    const lastCallerAudioMs =
+      turnInfo?.lastCallerAudioMs || this.lastCallerAudioReceivedMs || finalTranscriptMs - 400;
+    const speechEndVadMs =
+      turnInfo?.speechEndVadMs || (this.lastCallerAudioReceivedMs ? this.lastCallerAudioReceivedMs + 400 : finalTranscriptMs);
+
     this.ttsStatus = "SYNTHESIZING";
-    const result = await this.conversationEngine.processCallerUtterance(text);
+    const llmStartMs = Date.now();
+    let llmFirstTokenMs: number | undefined;
+
+    const result = await this.conversationEngine.processCallerUtterance(text, () => {
+      if (!llmFirstTokenMs) {
+        llmFirstTokenMs = Date.now();
+      }
+    });
+
+    llmFirstTokenMs = result.llmTimestamps?.llmFirstTokenMs || llmFirstTokenMs || Date.now();
+    const llmResponseReadyMs = result.llmTimestamps?.llmResponseReadyMs || Date.now();
+
     this.lastAiResponse = result.replyText;
 
     this.conversationTurns.push({
@@ -244,14 +281,26 @@ export class CallMediaSession extends EventEmitter {
       transferDestination: result.transferDestination,
     });
 
+    const ttsStartMs = Date.now();
+    let ttsFirstAudioMs = 0;
+    let firstAudioSentToExotelMs = 0;
+    let lastAudioSentToExotelMs = 0;
+
     try {
       const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
         language: "ml-IN",
         voiceId: "kavitha",
       });
 
+      ttsFirstAudioMs = Date.now();
+
       if (pcmAudio && pcmAudio.length > 0 && !this.isStopped) {
-        await this.streamPcmAudio(pcmAudio);
+        await this.streamPcmAudio(pcmAudio, () => {
+          if (!firstAudioSentToExotelMs) {
+            firstAudioSentToExotelMs = Date.now();
+          }
+        });
+        lastAudioSentToExotelMs = Date.now();
       } else {
         this.ttsStatus = "IDLE";
       }
@@ -259,22 +308,71 @@ export class CallMediaSession extends EventEmitter {
       console.warn(`[CallSession ${this.callSid}] Response synthesis error:`, err);
       this.ttsStatus = "IDLE";
     }
+
+    const speechEndToTranscriptMs = Math.max(0, finalTranscriptMs - speechEndVadMs);
+    const transcriptToLlmFirstTokenMs = Math.max(0, (llmFirstTokenMs || llmResponseReadyMs) - finalTranscriptMs);
+    const llmFirstTokenToTtsAudioMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - (llmFirstTokenMs || llmStartMs));
+    const ttsFirstAudioDurationMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - ttsStartMs);
+    const totalSpeechEndToAudibleResponseMs = firstAudioSentToExotelMs > 0
+      ? Math.max(0, firstAudioSentToExotelMs - speechEndVadMs)
+      : Math.max(0, (ttsFirstAudioMs || Date.now()) - speechEndVadMs);
+
+    const turnMetrics: TurnLatencyMetrics = {
+      turnId,
+      callSid: this.callSid,
+      streamSid: this.streamSid,
+      callerTranscript: text,
+      aiResponseText: result.replyText,
+      timestamps: {
+        lastCallerAudioMs,
+        speechEndVadMs,
+        finalTranscriptMs,
+        llmStartMs,
+        llmFirstTokenMs,
+        llmResponseReadyMs,
+        ttsStartMs,
+        ttsFirstAudioMs: ttsFirstAudioMs || ttsStartMs,
+        firstAudioSentToExotelMs: firstAudioSentToExotelMs || ttsFirstAudioMs || ttsStartMs,
+        lastAudioSentToExotelMs: lastAudioSentToExotelMs || firstAudioSentToExotelMs || ttsFirstAudioMs,
+      },
+      latencies: {
+        speechEndToTranscriptMs,
+        transcriptToLlmFirstTokenMs,
+        llmFirstTokenToTtsAudioMs,
+        ttsFirstAudioMs: ttsFirstAudioDurationMs,
+        totalSpeechEndToAudibleResponseMs,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    this.turnLatencyMetrics.push(turnMetrics);
+    mediaSessionManager.recordTurnMetrics(turnMetrics);
+
+    console.log(
+      `[CallSession ${this.callSid}] Turn ${turnId} Latency Breakdown: Total=${totalSpeechEndToAudibleResponseMs}ms ` +
+      `(VAD->STT: ${speechEndToTranscriptMs}ms, STT->LLM: ${transcriptToLlmFirstTokenMs}ms, ` +
+      `LLM->TTS: ${llmFirstTokenToTtsAudioMs}ms, TTS: ${ttsFirstAudioDurationMs}ms) | ` +
+      `Caller: "${text}" -> AI: "${result.replyText.substring(0, 40)}..."`
+    );
   }
 
   /**
    * Streams a PCM audio buffer to Exotel in compliant chunks (3200 bytes, multiples of 320).
    */
-  public async streamPcmAudio(pcmBuffer: Buffer): Promise<void> {
+  public async streamPcmAudio(pcmBuffer: Buffer, onFirstChunkSent?: () => void): Promise<void> {
     this.ttsStatus = "PLAYING";
     this.playbackQueue.resetInterruption();
 
     const chunks = this.audioEngine.splitIntoExotelChunks(pcmBuffer, 3200);
 
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
       if (this.isStopped || this.isInterrupted) {
         break;
       }
-      this.sendOutboundAudio(chunk);
+      this.sendOutboundAudio(chunks[i]);
+      if (i === 0 && onFirstChunkSent) {
+        onFirstChunkSent();
+      }
       // Progressive pacing for 200ms audio chunks
       await new Promise((r) => setTimeout(r, 180));
     }
@@ -292,6 +390,7 @@ export class CallMediaSession extends EventEmitter {
     const pcm = this.audioEngine.decodeBase64Audio(chunk.payload);
     this.audioChunksReceived++;
     this.totalIncomingBytes += pcm.length;
+    this.lastCallerAudioReceivedMs = Date.now();
 
     // Diagnostic Echo Mode: if enabled, immediately reflect audio back to caller
     if (this.echoMode) {
@@ -461,6 +560,10 @@ export class CallMediaSession extends EventEmitter {
       lastCallerTranscript: this.lastCallerTranscript || null,
       lastAiResponse: this.lastAiResponse || null,
       turnCount: this.conversationTurns.length,
+      recentTurnMetrics: this.turnLatencyMetrics.slice(-5),
+      lastTurnLatencyMs:
+        this.turnLatencyMetrics[this.turnLatencyMetrics.length - 1]?.latencies
+          .totalSpeechEndToAudibleResponseMs ?? null,
     };
   }
 }
@@ -483,12 +586,66 @@ export interface CompletedSessionSummary {
   startedAt: string;
   stoppedAt: string;
   timestamp: string;
+  averageTurnLatencyMs?: number | null;
+  turnLatencyMetrics?: TurnLatencyMetrics[];
 }
 
 export class MediaSessionManager extends EventEmitter {
   private sessionsByStream: Map<string, CallMediaSession> = new Map();
   private sessionsByCall: Map<string, CallMediaSession> = new Map();
   private completedSessions: CompletedSessionSummary[] = [];
+  private recentTurnMetrics: TurnLatencyMetrics[] = [];
+
+  public recordTurnMetrics(metrics: TurnLatencyMetrics): void {
+    this.recentTurnMetrics.push(metrics);
+    if (this.recentTurnMetrics.length > 50) {
+      this.recentTurnMetrics.shift();
+    }
+  }
+
+  public getRecentTurnMetrics(limit = 20): TurnLatencyMetrics[] {
+    return this.recentTurnMetrics.slice(-limit);
+  }
+
+  public getAggregateLatencyStats(): AggregateLatencyStats {
+    const turns = this.recentTurnMetrics;
+    if (turns.length === 0) {
+      return {
+        totalTurns: 0,
+        medianTotalLatencyMs: 0,
+        p95TotalLatencyMs: 0,
+        medianSttLatencyMs: 0,
+        medianLlmLatencyMs: 0,
+        medianTtsLatencyMs: 0,
+      };
+    }
+
+    const totals = turns
+      .map((t) => t.latencies.totalSpeechEndToAudibleResponseMs)
+      .sort((a, b) => a - b);
+    const stts = turns
+      .map((t) => t.latencies.speechEndToTranscriptMs)
+      .sort((a, b) => a - b);
+    const llms = turns
+      .map((t) => t.latencies.transcriptToLlmFirstTokenMs)
+      .sort((a, b) => a - b);
+    const ttss = turns
+      .map((t) => t.latencies.ttsFirstAudioMs)
+      .sort((a, b) => a - b);
+
+    const median = (arr: number[]) => arr[Math.floor(arr.length / 2)] || 0;
+    const p95 = (arr: number[]) =>
+      arr[Math.floor(arr.length * 0.95)] || arr[arr.length - 1] || 0;
+
+    return {
+      totalTurns: turns.length,
+      medianTotalLatencyMs: median(totals),
+      p95TotalLatencyMs: p95(totals),
+      medianSttLatencyMs: median(stts),
+      medianLlmLatencyMs: median(llms),
+      medianTtsLatencyMs: median(ttss),
+    };
+  }
 
   public registerSession(session: CallMediaSession): void {
     this.sessionsByStream.set(session.streamSid, session);
@@ -499,11 +656,24 @@ export class MediaSessionManager extends EventEmitter {
       this.sessionsByCall.delete(session.callSid);
 
       const summary = session.getSummary();
+      const turnMetrics = session.turnLatencyMetrics;
+      const averageTurnLatencyMs =
+        turnMetrics.length > 0
+          ? Math.round(
+              turnMetrics.reduce(
+                (acc, t) => acc + t.latencies.totalSpeechEndToAudibleResponseMs,
+                0
+              ) / turnMetrics.length
+            )
+          : null;
+
       this.completedSessions.push({
         ...summary,
         startedAt: session.startedAt?.toISOString() || new Date().toISOString(),
         stoppedAt: session.stoppedAt?.toISOString() || new Date().toISOString(),
         timestamp: new Date().toISOString(),
+        averageTurnLatencyMs,
+        turnLatencyMetrics: session.turnLatencyMetrics,
       });
       if (this.completedSessions.length > 30) {
         this.completedSessions.shift();

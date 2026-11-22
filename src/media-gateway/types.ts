@@ -183,5 +183,52 @@ export interface MediaGatewayConfig {
   enableDebugLogging?: boolean;
   echoMode?: boolean; // Diagnostic echo mode: echo caller voice back immediately
   autoPlayGreeting?: boolean; // Auto-play Malayalam welcome greeting
+  silenceTimeoutMs?: number; // STT VAD silence duration (default: 400ms)
+  ttsPace?: number; // TTS speaking rate (default: 1.15)
+}
+
+// ----------------------------------------------------
+// TURN LATENCY TELEMETRY & PROFILING TYPES
+// ----------------------------------------------------
+
+export interface TurnLatencyTimestamps {
+  lastCallerAudioMs: number;
+  speechEndVadMs: number;
+  finalTranscriptMs: number;
+  llmStartMs: number;
+  llmFirstTokenMs?: number;
+  llmResponseReadyMs: number;
+  ttsStartMs: number;
+  ttsFirstAudioMs: number;
+  firstAudioSentToExotelMs: number;
+  lastAudioSentToExotelMs?: number;
+}
+
+export interface TurnLatencyDurations {
+  speechEndToTranscriptMs: number;
+  transcriptToLlmFirstTokenMs: number;
+  llmFirstTokenToTtsAudioMs: number;
+  ttsFirstAudioMs: number;
+  totalSpeechEndToAudibleResponseMs: number;
+}
+
+export interface TurnLatencyMetrics {
+  turnId: number;
+  callSid: string;
+  streamSid: string;
+  callerTranscript: string;
+  aiResponseText: string;
+  timestamps: TurnLatencyTimestamps;
+  latencies: TurnLatencyDurations;
+  timestamp: string;
+}
+
+export interface AggregateLatencyStats {
+  totalTurns: number;
+  medianTotalLatencyMs: number;
+  p95TotalLatencyMs: number;
+  medianSttLatencyMs: number;
+  medianLlmLatencyMs: number;
+  medianTtsLatencyMs: number;
 }
 
