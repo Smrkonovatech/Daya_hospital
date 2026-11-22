@@ -662,3 +662,93 @@ model AiAgentVersion {
   @@unique([agentId, versionNumber])
   @@index([agentId, versionNumber])
 }
+
+// ----------------------------------------------------
+// 11. INBOUND CALL FLOWS & VISUAL IVR (PHASE 4)
+// ----------------------------------------------------
+
+enum IvrFlowStatus {
+  DRAFT
+  VALIDATED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ExotelDeploymentStatus {
+  SMRKOMED_DRAFT
+  VALIDATED
+  PUBLISHED_INTERNALLY
+  EXOTEL_MAPPING_REQUIRED
+  EXOTEL_MAPPING_VERIFIED
+  ACTIVE
+}
+
+model IvrFlow {
+  id                   String                 @id @default(cuid())
+  hospitalId           String
+  name                 String
+  description          String?
+  status               IvrFlowStatus          @default(DRAFT)
+  deploymentStatus     ExotelDeploymentStatus @default(SMRKOMED_DRAFT)
+  isDefault            Boolean                @default(false)
+  currentVersion       Int                    @default(1)
+  
+  // Graph Data
+  nodesJson            Json                   // Array<FlowNode>
+  edgesJson            Json                   // Array<FlowEdge>
+  variablesJson        Json?                  // Flow-level settings, timeout, fallback rules
+  
+  // Exotel Provider Mapping
+  exotelAppletId       String?
+  exotelAppletName     String?
+  exotelEndpointUrl    String?
+  exotelVerifiedAt     DateTime?
+  
+  lastUpdatedBy        String
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  versions             IvrFlowVersion[]
+  executionSessions    IvrFlowExecutionSession[]
+
+  @@index([hospitalId, status])
+  @@index([hospitalId, isDefault])
+}
+
+model IvrFlowVersion {
+  id                   String                 @id @default(cuid())
+  flowId               String
+  versionNumber        Int
+  status               IvrFlowStatus          @default(PUBLISHED)
+  deploymentStatus     ExotelDeploymentStatus @default(PUBLISHED_INTERNALLY)
+  changelog            String?
+  snapshotJson         Json                   // Immutable snapshot of nodes, edges, variables
+  publishedBy          String
+  publishedAt          DateTime               @default(now())
+
+  flow                 IvrFlow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@unique([flowId, versionNumber])
+  @@index([flowId, versionNumber])
+}
+
+model IvrFlowExecutionSession {
+  id                   String                 @id @default(cuid())
+  flowId               String
+  versionNumber        Int
+  callSid              String?
+  callerNumber         String?
+  hospitalId           String
+  currentNodeId        String
+  variables            Json?
+  status               String                 @default("ACTIVE") // ACTIVE, COMPLETED, TRANSFERRED, FAILED
+  executionLog         Json                   // Array of transition logs
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  flow                 IvrFlow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId, versionNumber])
+  @@index([callSid])
+  @@index([hospitalId, status])
+}

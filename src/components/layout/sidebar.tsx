@@ -10,6 +10,7 @@ import {
   Activity,
   BookOpen,
   Bot,
+  GitBranch,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -54,6 +55,13 @@ const navItems = [
     href: "/agents",
     icon: Bot,
     badge: "Sarvam",
+    badgeVariant: "teal" as const,
+  },
+  {
+    name: "IVR Call Flows",
+    href: "/ivr",
+    icon: GitBranch,
+    badge: "Builder",
     badgeVariant: "teal" as const,
   },
   {

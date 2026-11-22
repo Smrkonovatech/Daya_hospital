@@ -9,6 +9,7 @@ import {
   Activity,
   BookOpen,
   Bot,
+  GitBranch,
   Settings,
   Bell,
 } from "lucide-react";
@@ -50,6 +51,12 @@ const NAV_ITEMS: NavItem[] = [
     shortLabel: "Agents",
     icon: Bot,
     href: "/agents",
+  },
+  {
+    label: "IVR Call Flows",
+    shortLabel: "IVR",
+    icon: GitBranch,
+    href: "/ivr",
   },
   {
     label: "Knowledge Base",
