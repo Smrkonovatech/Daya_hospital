@@ -170,11 +170,11 @@ export class ExotelTelephonyService {
 
     const conf = hospitalConfig || getHospitalConfig();
     const primaryReceptionistClean = this.normalizePhoneNumber(
-      conf.routing.casualtyDirectNumber || "+919606654032"
+      conf.routing.casualtyDirectNumber || (conf.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : "")
     ).clean10Digits;
 
     // Check against Daya Hospital primary receptionist hotline
-    if (norm.clean10Digits === "9606654032" || norm.clean10Digits === primaryReceptionistClean) {
+    if (conf.hospitalId === "hosp_daya_thrissur" && (norm.clean10Digits === "9606654032" || norm.clean10Digits === primaryReceptionistClean)) {
       return true;
     }
 

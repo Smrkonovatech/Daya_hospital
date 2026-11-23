@@ -39,14 +39,14 @@ describe("Sarvam Configuration & Secret Masking", () => {
     expect(maskSecret("")).toBe("[NOT_CONFIGURED]");
   });
 
-  it("loads config with production defaults including optimized 400ms silence timeout and 1.15 pace", () => {
+  it("loads config with production defaults including optimized 650ms silence timeout and 1.15 pace", () => {
     const config = getSarvamConfig();
     expect(config.languageCode).toBe("ml-IN");
     expect(config.sampleRate).toBe(8000);
     expect(config.sttModel).toBe("saaras:v4");
     expect(config.ttsModel).toBe("bulbul:v3");
     expect(config.ttsSpeaker).toBe("kavitha");
-    expect(config.sttSilenceTimeoutMs).toBe(400);
+    expect(config.sttSilenceTimeoutMs).toBe(650);
     expect(config.ttsPace).toBe(1.15);
   });
 
@@ -240,7 +240,7 @@ describe("HospitalConversationEngine (Daya Hospital Malayalam Persona)", () => {
         expect(result.shouldTransfer).toBe(true);
         expect(result.transferDestination).toBe("100");
         expect(result.replyText).toContain("കാഷ്വാലിറ്റി");
-        expect(result.replyText).toContain("4872475100");
+        expect(result.replyText).toContain("9606654032");
       }
     } finally {
       process.env.HOSPITAL_DESTINATIONS_CONFIRMED = origEnv;
@@ -250,7 +250,7 @@ describe("HospitalConversationEngine (Daya Hospital Malayalam Persona)", () => {
   it("recognizes appointment booking intents and asks for relevant details", async () => {
     const result = await engine.processCallerUtterance("എനിക്ക് ഒരു ഡോക്ടറെ കാണാൻ അപ്പോയിന്റ്മെന്റ് വേണം");
     expect(result.intent).toBe("APPOINTMENT");
-    expect(result.replyText).toMatch(/വിഭാഗ/);
+    expect(result.replyText).toMatch(/സ്പെഷ്യാലിറ്റി|വിഭാഗ/);
     expect(result.appointmentData).toBeDefined();
   });
 

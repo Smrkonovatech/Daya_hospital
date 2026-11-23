@@ -32,6 +32,7 @@ import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/li
 import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
 import { EmergencyDetector } from "@/lib/services/emergency-detector";
 import { LanguageDetector } from "@/lib/services/language-detector";
+import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
 
 export interface SocketSender {
   send(data: string, cb?: (err?: Error) => void): void;
@@ -96,6 +97,9 @@ export class CallMediaSession extends EventEmitter {
   // Phase 2: Live AI Speech & Conversation State
   public sttStatus: "IDLE" | "CONNECTED" | "STREAMING" | "ERROR" = "IDLE";
   public ttsStatus: "IDLE" | "SYNTHESIZING" | "PLAYING" | "INTERRUPTED" = "IDLE";
+  public escalationState: "NONE" | "HUMAN_TRANSFER" | "EMERGENCY" = "NONE";
+  public transferReason?: string;
+  public transferDestinationPhone?: string;
   public lastCallerTranscript?: string;
   public lastAiResponse?: string;
   public conversationTurns: Array<{ speaker: "caller" | "ai"; text: string; timestampMs: number }> = [];
@@ -140,6 +144,7 @@ export class CallMediaSession extends EventEmitter {
   private lastProcessedTranscriptTime = 0;
   private lastSpeechStartTimestamp = 0;
   private lastAiResponseTimestamp = 0;
+  private isTearingDown = false;
 
   constructor(options: CallSessionInitOptions) {
     super();
@@ -192,7 +197,7 @@ export class CallMediaSession extends EventEmitter {
       );
     }
 
-    // AI Components Initialization with low-latency VAD (400ms) & brisk Malayalam TTS pace (1.15)
+    // AI Components Initialization with natural Malayalam pause tolerance (450 energy VAD, 650ms silence) & brisk TTS pace (1.15)
     this.conversationEngine =
       options.conversationEngine || new HospitalConversationEngine(this.hospitalConfig);
     this.sttProvider =
@@ -200,9 +205,15 @@ export class CallMediaSession extends EventEmitter {
       new SarvamSpeechToTextProvider({
         sampleRate: 8000,
         languageCode: "ml-IN",
+        vadThreshold:
+          process.env.SARVAM_VAD_THRESHOLD
+            ? Number(process.env.SARVAM_VAD_THRESHOLD)
+            : 450,
         silenceTimeoutMs:
           options.silenceTimeoutMs ??
-          (process.env.SARVAM_STT_SILENCE_TIMEOUT_MS ? Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS) : 280),
+          (process.env.SARVAM_STT_SILENCE_TIMEOUT_MS
+            ? Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS)
+            : 650),
       });
     const resolvedAgent = this.tenantResult.assignedAgent;
     this.ttsProvider =
@@ -246,6 +257,29 @@ export class CallMediaSession extends EventEmitter {
 
           if (this.isExecutingIvrFlow) {
             this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: chunkText }).catch(() => {});
+          } else {
+            const casualtyDest =
+              this.hospitalConfig.routing.casualtyDirectNumber ||
+              (this.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : "");
+            this.escalationState = "EMERGENCY";
+            this.transferReason = `Continuous emergency detected: ${emMatch.matchedPhrase}`;
+            this.transferDestinationPhone = casualtyDest;
+            mediaSessionManager.recordEscalation({
+              callSid: this.callSid,
+              streamSid: this.streamSid,
+              hospitalId: this.hospitalId,
+              callerNumber: this.fromNumber,
+              escalationState: "EMERGENCY",
+              destination: casualtyDest,
+              reason: this.transferReason,
+              timestamp: Date.now(),
+            });
+            console.log(
+              `[CallSession ${this.callSid}] Continuous emergency in direct mode. Fast-tracking to ${casualtyDest}. Flushing audio and closing WebSocket.`
+            );
+            this.drainAndFlushAudio().then(() => {
+              this.executeIdempotentTeardown(1000, "Emergency Transfer");
+            });
           }
         }
       }
@@ -632,8 +666,24 @@ export class CallMediaSession extends EventEmitter {
 
         const destination =
           stepResult.transferDestination ||
+          (this.hospitalId === "hosp_daya_thrissur" ? this.hospitalConfig.routing.receptionistNumber || "+919606654032" : this.hospitalConfig.routing.receptionistNumber || "") ||
           this.hospitalConfig.telephony.incomingHospitalNumber ||
           "";
+
+        this.escalationState = "HUMAN_TRANSFER";
+        this.transferReason = stepResult.logMessage || "Staff transfer requested by caller";
+        this.transferDestinationPhone = destination;
+
+        mediaSessionManager.recordEscalation({
+          callSid: this.callSid,
+          streamSid: this.streamSid,
+          hospitalId: this.hospitalId,
+          callerNumber: this.fromNumber,
+          escalationState: "HUMAN_TRANSFER",
+          destination,
+          reason: this.transferReason,
+          timestamp: Date.now(),
+        });
 
         if (stepResult.audioText) {
           this.conversationTurns.push({
@@ -675,7 +725,12 @@ export class CallMediaSession extends EventEmitter {
             );
             await this.executeIvrStep({ type: "TRANSFER_FAILED", value: res.error || "Transfer failed" });
           } else {
-            this.state = "STOPPED";
+            console.log(
+              `[CallSession ${this.callSid}] Call transferred to ${this.maskPhoneNumber(destination)}. Flushing audio and closing WebSocket to trigger carrier Passthru routing.`
+            );
+            this.drainAndFlushAudio().then(() => {
+              this.executeIdempotentTeardown(1000, "Call Transferred");
+            });
           }
         } catch (err) {
           console.error(`[CallSession ${this.callSid}] Exotel transfer exception:`, err);
@@ -698,14 +753,32 @@ export class CallMediaSession extends EventEmitter {
           (emConfig?.isVerified && emConfig?.casualtyNumber) ||
           stepResult.transferDestination ||
           this.hospitalConfig.routing.casualtyDirectNumber ||
-          "";
+          (this.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : "");
 
         const isTransferAllowed = Boolean(
-          emConfig?.allowLiveTransfer &&
-          emConfig?.isVerified &&
-          casualtyDestination &&
+          (emConfig?.allowLiveTransfer && emConfig?.isVerified && casualtyDestination) ||
+          (this.hospitalId === "hosp_daya_thrissur" && casualtyDestination) ||
           process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true"
         );
+
+        if (isTransferAllowed) {
+          this.escalationState = "EMERGENCY";
+          this.transferReason = stepResult.logMessage || "Emergency triage triggered";
+          this.transferDestinationPhone = casualtyDestination;
+
+          mediaSessionManager.recordEscalation({
+            callSid: this.callSid,
+            streamSid: this.streamSid,
+            hospitalId: this.hospitalId,
+            callerNumber: this.fromNumber,
+            escalationState: "EMERGENCY",
+            destination: casualtyDestination,
+            reason: this.transferReason,
+            timestamp: Date.now(),
+          });
+        } else {
+          this.escalationState = "NONE";
+        }
 
         console.log(
           `[CallSession ${this.callSid}] [EMERGENCY PROTOCOL] Fast-tracking call to Casualty (destination: ${casualtyDestination || "NONE"}, allowLiveTransfer: ${isTransferAllowed})`
@@ -796,6 +869,13 @@ export class CallMediaSession extends EventEmitter {
             if (pcm && pcm.length > 0 && !this.isStopped) {
               await this.streamPcmAudio(pcm);
             }
+          } else {
+            console.log(
+              `[CallSession ${this.callSid}] Emergency call transferred to ${this.maskPhoneNumber(casualtyDestination)}. Flushing audio and closing WebSocket to trigger carrier Passthru routing.`
+            );
+            this.drainAndFlushAudio().then(() => {
+              this.executeIdempotentTeardown(1000, "Emergency Transfer");
+            });
           }
         } catch {
           // Fallback instructions
@@ -828,7 +908,10 @@ export class CallMediaSession extends EventEmitter {
           } catch {}
         }
 
-        this.close();
+        setTimeout(() => {
+          this.close();
+          this.closeSocket(1000, "Call Ended");
+        }, 1200);
         break;
       }
     }
@@ -1026,10 +1109,17 @@ export class CallMediaSession extends EventEmitter {
       }
 
       if (this.isExecutingIvrFlow && result.shouldTransfer) {
-        console.log(
-          `[CallSession ${this.callSid}] AI conversation requested staff handoff (intent=${result.intent}). Routing to IVR handoff.`
-        );
-        await this.executeIvrStep({ type: "AI_HANDOFF", value: text });
+        if (result.intent === "CASUALTY") {
+          console.log(
+            `[CallSession ${this.callSid}] AI conversation detected emergency (intent=${result.intent}). Routing to IVR emergency escalation.`
+          );
+          await this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: text });
+        } else {
+          console.log(
+            `[CallSession ${this.callSid}] AI conversation requested staff handoff (intent=${result.intent}). Routing to IVR handoff.`
+          );
+          await this.executeIvrStep({ type: "AI_HANDOFF", value: text });
+        }
         return;
       }
 
@@ -1094,6 +1184,39 @@ export class CallMediaSession extends EventEmitter {
             this.ttsStatus = "IDLE";
           }
         }
+      }
+
+      // If direct conversational AI requested human transfer or emergency, initiate handover
+      if (!this.isExecutingIvrFlow && result.shouldTransfer) {
+        const isEmergency = result.intent === "CASUALTY";
+        const state = isEmergency ? "EMERGENCY" : "HUMAN_TRANSFER";
+        const dest =
+          result.transferDestination ||
+          (isEmergency
+            ? this.hospitalConfig.routing.casualtyDirectNumber || (this.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : "")
+            : this.hospitalConfig.routing.receptionistNumber || (this.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : ""));
+
+        this.escalationState = state;
+        this.transferReason = `Direct AI requested ${state} (intent=${result.intent})`;
+        this.transferDestinationPhone = dest;
+
+        mediaSessionManager.recordEscalation({
+          callSid: this.callSid,
+          streamSid: this.streamSid,
+          hospitalId: this.hospitalId,
+          callerNumber: this.fromNumber,
+          escalationState: state,
+          destination: dest,
+          reason: this.transferReason,
+          timestamp: Date.now(),
+        });
+
+        console.log(
+          `[CallSession ${this.callSid}] Direct AI requested transfer to ${this.maskPhoneNumber(dest)}. Flushing audio and closing WebSocket to trigger carrier Passthru routing.`
+        );
+        this.drainAndFlushAudio().then(() => {
+          this.executeIdempotentTeardown(1000, isEmergency ? "Emergency Transfer" : "Call Transferred");
+        });
       }
 
       const speechEndToTranscriptMs = Math.max(0, finalTranscriptMs - speechEndVadMs);
@@ -1398,6 +1521,51 @@ export class CallMediaSession extends EventEmitter {
     });
   }
 
+  /**
+   * Dynamically awaits completion of all pending queued audio chunks in the playback queue,
+   * plus a 600ms acoustic margin for carrier transmission to ensure audio finishes playing
+   * in the caller's ear before socket disconnect.
+   */
+  public async drainAndFlushAudio(maxWaitMs = 5000): Promise<void> {
+    const start = Date.now();
+    while (this.playbackQueue.hasPending() && Date.now() - start < maxWaitMs) {
+      if (this.isStopped || this.isInterrupted) break;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    // Acoustic jitter margin for final chunk transmission
+    await new Promise((r) => setTimeout(r, 600));
+  }
+
+  /**
+   * Strictly idempotent call teardown ensuring WebSocket close and event emissions
+   * happen exactly once per session.
+   */
+  public executeIdempotentTeardown(code = 1000, reason = "Normal Termination"): void {
+    if (this.isTearingDown) {
+      console.log(`[CallSession ${this.callSid}] Teardown already executed (${reason}). Discarding duplicate call.`);
+      return;
+    }
+    this.isTearingDown = true;
+    this.state = "STOPPED";
+    this.close();
+    this.closeSocket(code, reason);
+  }
+
+  /**
+   * Gracefully terminates the underlying Exotel WebSocket connection.
+   * Signals Exotel Voicebot Applet that the interactive stream is complete,
+   * causing Exotel to advance the call to the downstream Connect / Transfer applet.
+   */
+  public closeSocket(code = 1000, reason = "Normal Closure"): void {
+    try {
+      if (this.socket && typeof (this.socket as any).close === "function") {
+        (this.socket as any).close(code, reason);
+      }
+    } catch (err) {
+      console.warn(`[CallSession ${this.callSid}] Error closing socket:`, err);
+    }
+  }
+
   private calculateRms(buffer: Buffer): number {
     const sampleCount = Math.floor(buffer.length / 2);
     if (sampleCount === 0) return 0;
@@ -1561,11 +1729,131 @@ export interface CompletedSessionSummary {
   };
 }
 
+export interface EscalationDecisionRecord {
+  callSid: string;
+  streamSid?: string;
+  hospitalId: string;
+  callerNumber?: string;
+  escalationState: "EMERGENCY" | "HUMAN_TRANSFER" | "NONE";
+  destination: string;
+  reason: string;
+  timestamp: number;
+}
+
 export class MediaSessionManager extends EventEmitter {
   private sessionsByStream: Map<string, CallMediaSession> = new Map();
   private sessionsByCall: Map<string, CallMediaSession> = new Map();
   private completedSessions: CompletedSessionSummary[] = [];
   private recentTurnMetrics: TurnLatencyMetrics[] = [];
+  private escalationRecords: Map<string, EscalationDecisionRecord> = new Map();
+  private escalationsByCaller: Map<string, EscalationDecisionRecord> = new Map();
+
+  public async recordEscalation(record: EscalationDecisionRecord): Promise<void> {
+    this.escalationRecords.set(record.callSid, record);
+    if (record.callerNumber) {
+      const clean = record.callerNumber.replace(/\D/g, "").slice(-10);
+      if (clean) {
+        this.escalationsByCaller.set(clean, record);
+      }
+    }
+    console.log(
+      `[MediaSessionManager] Recorded escalation decision for CallSid ${record.callSid}: ` +
+      `state=${record.escalationState}, dest=${record.destination}, reason="${record.reason}"`
+    );
+    if (this.escalationRecords.size > 100) {
+      const first = this.escalationRecords.keys().next().value;
+      if (first) this.escalationRecords.delete(first);
+    }
+
+    // Persist to Neon PostgreSQL DurableIdempotencyRecord for cross-instance and rolling deployment durability
+    try {
+      const dbStatus = await checkDatabaseConnection();
+      if (dbStatus.connected) {
+        await prisma.durableIdempotencyRecord.upsert({
+          where: {
+            hospitalId_idempotencyKey: {
+              hospitalId: record.hospitalId || "hosp_daya_thrissur",
+              idempotencyKey: `escalation_${record.callSid}`,
+            },
+          },
+          create: {
+            hospitalId: record.hospitalId || "hosp_daya_thrissur",
+            idempotencyKey: `escalation_${record.callSid}`,
+            resourceType: "CALL_ESCALATION",
+            callSid: record.callSid,
+            status: record.escalationState,
+            responseJson: JSON.stringify(record),
+            expiresAt: new Date(Date.now() + 600000), // 10 minutes TTL
+          },
+          update: {
+            status: record.escalationState,
+            responseJson: JSON.stringify(record),
+            expiresAt: new Date(Date.now() + 600000),
+          },
+        });
+        console.log(`[MediaSessionManager:Neon] Durable escalation persisted for CallSid ${record.callSid} to Neon DB.`);
+      }
+    } catch (err: any) {
+      console.warn(`[MediaSessionManager:Neon] Failed to persist escalation to Neon DB:`, err?.message || err);
+    }
+  }
+
+  public async getEscalation(callSid?: string, callerNumber?: string): Promise<EscalationDecisionRecord | undefined> {
+    // 1. Fast in-memory check
+    if (callSid && this.escalationRecords.has(callSid)) {
+      const rec = this.escalationRecords.get(callSid);
+      if (rec && Date.now() - rec.timestamp < 600000) {
+        return rec;
+      }
+    }
+    if (callerNumber) {
+      const clean = callerNumber.replace(/\D/g, "").slice(-10);
+      if (clean && this.escalationsByCaller.has(clean)) {
+        const rec = this.escalationsByCaller.get(clean);
+        if (rec && Date.now() - rec.timestamp < 600000) {
+          return rec;
+        }
+      }
+    }
+
+    // 2. Cross-instance fallback to Neon PostgreSQL
+    try {
+      const dbStatus = await checkDatabaseConnection();
+      if (dbStatus.connected && (callSid || callerNumber)) {
+        const whereClause: any = {
+          resourceType: "CALL_ESCALATION",
+          expiresAt: { gt: new Date() },
+        };
+        if (callSid) {
+          whereClause.callSid = callSid;
+        }
+
+        const dbRec = await prisma.durableIdempotencyRecord.findFirst({
+          where: whereClause,
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (dbRec && dbRec.responseJson) {
+          try {
+            const parsed = JSON.parse(dbRec.responseJson) as EscalationDecisionRecord;
+            if (Date.now() - parsed.timestamp < 600000) {
+              // Cache in local process
+              this.escalationRecords.set(parsed.callSid, parsed);
+              return parsed;
+            }
+          } catch {}
+        }
+      }
+    } catch (dbErr: any) {
+      console.warn(`[MediaSessionManager:Neon] Database lookup error for CallSid ${callSid}:`, dbErr?.message || dbErr);
+    }
+
+    return undefined;
+  }
+
+  public getRecentEscalations(limit = 20): EscalationDecisionRecord[] {
+    return Array.from(this.escalationRecords.values()).slice(-limit);
+  }
 
   public recordTurnMetrics(metrics: TurnLatencyMetrics): void {
     this.recentTurnMetrics.push(metrics);

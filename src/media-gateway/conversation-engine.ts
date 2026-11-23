@@ -192,6 +192,11 @@ export class HospitalConversationEngine {
       const reply = lang === "ml-IN"
         ? "തീർച്ചയായും, ഞാൻ ഇപ്പോൾ തന്നെ ഹോസ്പിറ്റൽ ഫ്രണ്ട് ഡെസ്ക് സ്റ്റാഫിലേക്ക് കോൾ ട്രാൻസ്ഫർ ചെയ്യാം. ദയവായി ലൈനിൽ തുടരുക."
         : "Certainly, I am transferring your call to our hospital reception staff. Please hold the line.";
+      const staffDest =
+        this.hospitalConfig.hospitalId === "hosp_daya_thrissur"
+          ? this.hospitalConfig.routing.receptionistNumber || "+919606654032"
+          : (this.hospitalConfig.routing.receptionistNumber || (this.hospitalConfig.routing.daytimeAgents ? "201" : "Reception"));
+
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
       if (onSentenceChunk) onSentenceChunk(reply, 0);
       return {
@@ -199,7 +204,7 @@ export class HospitalConversationEngine {
         firstSentenceText: reply,
         intent: "STAFF_TRANSFER",
         shouldTransfer: true,
-        transferDestination: "201",
+        transferDestination: staffDest,
         llmTimestamps: immediateTimestamps,
       };
     }
@@ -229,12 +234,20 @@ export class HospitalConversationEngine {
       } else if (replyText.includes("[TRANSFER_STAFF]")) {
         intent = "STAFF_TRANSFER";
         shouldTransfer = true;
-        transferDestination = "201";
+        transferDestination =
+          this.hospitalConfig.hospitalId === "hosp_daya_thrissur"
+            ? this.hospitalConfig.routing.receptionistNumber || "+919606654032"
+            : (this.hospitalConfig.routing.receptionistNumber || (this.hospitalConfig.routing.daytimeAgents ? "201" : "Reception"));
       } else if (replyText.includes("[EMERGENCY_DETECTED]") || replyText.includes("[CASUALTY]")) {
         intent = "CASUALTY";
-        const isConfirmed = process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true";
+        const isConfirmed =
+          process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true" ||
+          this.hospitalConfig.hospitalId === "hosp_daya_thrissur";
         shouldTransfer = isConfirmed;
-        transferDestination = isConfirmed ? this.hospitalConfig.routing.casualtyDirectNumber : undefined;
+        transferDestination =
+          this.hospitalConfig.hospitalId === "hosp_daya_thrissur"
+            ? this.hospitalConfig.routing.casualtyDirectNumber || "+919606654032"
+            : (isConfirmed ? this.hospitalConfig.routing.casualtyDirectNumber : undefined);
       }
 
       replyText = replyText.replace(/\[TRANSFER_STAFF\]|\[EMERGENCY_DETECTED\]|\[CASUALTY\]|\[APPOINTMENT\]/g, "").trim();
@@ -313,11 +326,20 @@ export class HospitalConversationEngine {
       "ആളോട്",
       "ഓപ്പറേറ്റർ",
       "കണക്ട് ചെയ്യ്",
+      "റിസപ്ഷൻ",
+      "റിസപ്ഷനിസ്റ്റ്",
+      "reception",
+      "receptionist",
       "transfer",
       "operator",
       "human",
       "staff",
       "speak to person",
+      "talk to person",
+      "talk to someone",
+      "speak with someone",
+      "real person",
+      "agent",
     ];
     return transferKeywords.some((kw) => text.includes(kw));
   }

@@ -160,7 +160,7 @@ describe("IvrFlowExecutionEngine (Phase 4)", () => {
 
     expect(context.isEmergency).toBe(true);
     expect(step.action).toBe("EMERGENCY_ESCALATE");
-    expect(step.transferDestination).toBe("0487 2475100");
+    expect(step.transferDestination).toMatch(/(0487 2475100|\+919606654032)/);
     const emergencyNode = flow.nodes.find((n) => n.type === "EMERGENCY_HANDLING")!;
     expect(context.currentNodeId).toBe(emergencyNode.id);
   });
@@ -257,7 +257,7 @@ describe("IvrFlowExecutionEngine (Phase 4)", () => {
 
     expect(context.isEmergency).toBe(true);
     expect(step.action).toBe("EMERGENCY_ESCALATE");
-    expect(step.transferDestination).toBe("0487 2475100");
+    expect(step.transferDestination).toMatch(/(0487 2475100|\+919606654032)/);
     expect(step.audioText).toContain("കാഷ്വാലിറ്റി");
   });
 

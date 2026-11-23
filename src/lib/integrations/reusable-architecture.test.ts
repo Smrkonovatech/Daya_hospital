@@ -165,7 +165,7 @@ describe("REUSABLE INTEGRATION ARCHITECTURE (BitVoice -> Smrko Voice -> Grandis 
 
     expect(result.shouldForwardToAi).toBe(false);
     expect(result.destination).toBe("CASUALTY_DESK");
-    expect(result.destinationNumberOrExt).toBe("+914872475100");
+    expect(result.destinationNumberOrExt).toBe(DAYA_HOSPITAL_CONFIG.routing.casualtyDirectNumber);
   });
 
   it("Call Routing Engine: Forwards appointment calls to Smrko Voice when human agents busy", () => {

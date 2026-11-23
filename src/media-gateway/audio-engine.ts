@@ -292,6 +292,18 @@ export class AudioPlaybackQueue {
     return this.queue.length > 0;
   }
 
+  /**
+   * Dynamically awaits completion of all pending queued audio chunks.
+   * Resolves immediately if the queue is already empty, or waits up to maxWaitMs.
+   */
+  public async waitForDrain(maxWaitMs = 5000): Promise<void> {
+    const start = Date.now();
+    while ((this.hasPending() || this.isProcessingQueue) && Date.now() - start < maxWaitMs) {
+      if (this.isInterrupted) break;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+
   public dequeue(): Buffer | null {
     if (this.queue.length === 0) {
       this.isPlaying = false;

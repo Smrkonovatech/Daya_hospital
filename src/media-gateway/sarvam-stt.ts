@@ -55,9 +55,14 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
     this.languageCode = options?.languageCode || this.config.languageCode || "ml-IN";
     this.model = options?.model || this.config.sttModel || "saaras:v4";
     this.sampleRate = options?.sampleRate || 8000;
-    this.vadThreshold = options?.vadThreshold ?? 400;
+    this.vadThreshold =
+      options?.vadThreshold ??
+      (process.env.SARVAM_VAD_THRESHOLD ? Number(process.env.SARVAM_VAD_THRESHOLD) : 450);
     this.silenceTimeoutMs =
-      options?.silenceTimeoutMs ?? this.config.sttSilenceTimeoutMs ?? 400;
+      options?.silenceTimeoutMs ??
+      (process.env.SARVAM_STT_SILENCE_TIMEOUT_MS
+        ? Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS)
+        : (this.config.sttSilenceTimeoutMs || 650));
   }
 
   /**

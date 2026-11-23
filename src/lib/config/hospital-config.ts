@@ -86,6 +86,7 @@ export interface RoutingHospitalConfig {
   maxHops: number;
   casualtyExtension: string;
   casualtyDirectNumber: string;
+  receptionistNumber?: string;
 }
 
 export interface HospitalConfig {
@@ -190,7 +191,8 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
     ringTimeoutSeconds: 20,
     maxHops: 3,
     casualtyExtension: "100",
-    casualtyDirectNumber: "+914872475100",
+    casualtyDirectNumber: process.env.DAYA_CASUALTY_NUMBER || "+919606654032",
+    receptionistNumber: process.env.DAYA_RECEPTION_NUMBER || "+919606654032",
   },
 };
 
@@ -199,21 +201,75 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
  */
 export const HOSPITAL_REGISTRY: Record<string, HospitalConfig> = {
   hosp_daya_thrissur: DAYA_HOSPITAL_CONFIG,
+  "daya-hospital": DAYA_HOSPITAL_CONFIG,
+};
+
+export const GENERIC_HOSPITAL_CONFIG: HospitalConfig = {
+  hospitalId: "hosp_generic_template",
+  hospitalName: "Hospital Partner Template",
+  shortName: "Hospital",
+  city: "City",
+  state: "State",
+  telephony: {
+    provider: "EXOTEL",
+    providerName: "Exotel Telephony Cloud",
+    incomingHospitalNumber: "",
+    forwardingScope: "APPOINTMENT_ONLY",
+    totalChannels: 10,
+    apiConfigured: false,
+    status: "MOCK_SANDBOX",
+    providerCoordinationNotes: "Tenant pending setup",
+  },
+  hms: {
+    product: "MOCK",
+    productName: "Generic HMS Integration",
+    vpnRequired: false,
+    vpnStatus: "DISCONNECTED",
+    timeoutMs: 3000,
+    idempotencyRequired: true,
+    status: "SANDBOX_MOCK",
+  },
+  voice: {
+    engine: "SMRKO_VOICE",
+    primaryLanguage: "MALAYALAM",
+    fallbackLanguage: "ENGLISH",
+    speechModelVersion: "Smrko Voice Saarathi v2.4",
+  },
+  routing: {
+    appointmentOnly: true,
+    daytimeAgents: 2,
+    expectedDailyIncoming: 100,
+    expectedDailyAbandoned: 20,
+    peakPeriod: "09:00 - 12:00",
+    ringTimeoutSeconds: 20,
+    maxHops: 3,
+    casualtyExtension: "100",
+    casualtyDirectNumber: "",
+    receptionistNumber: "",
+  },
 };
 
 /**
  * Returns active hospital configuration.
  * Resolves to Daya Hospital in standalone pilot mode, or tenant context when integrated with Smartcom Admin.
+ * Strictly prevents leaking Daya Hospital specific routing (+919606654032) to generic or other tenants.
  */
 export function getHospitalConfig(hospitalId?: string): HospitalConfig {
   const activeId = hospitalId || process.env.HOSPITAL_ID || DAYA_HOSPITAL_CONFIG.hospitalId;
+
+  if (activeId === "hosp_daya_thrissur") {
+    return DAYA_HOSPITAL_CONFIG;
+  }
 
   if (HOSPITAL_REGISTRY[activeId]) {
     return HOSPITAL_REGISTRY[activeId];
   }
 
-  // Fallback / default to Daya Hospital configuration
-  return DAYA_HOSPITAL_CONFIG;
+  // Safe isolated generic fallback - never leaks Daya specific routing (+919606654032)
+  return {
+    ...GENERIC_HOSPITAL_CONFIG,
+    hospitalId: activeId,
+  };
 }
 
 /**

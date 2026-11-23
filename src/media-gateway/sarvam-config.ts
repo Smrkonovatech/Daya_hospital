@@ -90,7 +90,7 @@ export function getSarvamConfig(overrides?: Partial<SarvamConfig>): SarvamConfig
     sttSilenceTimeoutMs:
       overrides?.sttSilenceTimeoutMs ||
       Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS) ||
-      400,
+      650,
 
     samvaadApiKey: samvaadApiKey || undefined,
     orgId,

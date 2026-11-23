@@ -718,9 +718,13 @@ export function createDefaultHospitalFlow(
   emergencyNumber = "",
   defaultAgentId = "agent_hospital_receptionist_v1"
 ): IvrFlowData {
+  const resolvedEmergencyNumber =
+    emergencyNumber ||
+    (hospitalId === "hosp_daya_thrissur" ? process.env.DAYA_CASUALTY_NUMBER || "+919606654032" : "");
+
   const defaults = {
     hospitalName,
-    emergencyNumber,
+    emergencyNumber: resolvedEmergencyNumber,
   };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 50, y: 220 }, defaults);
@@ -729,11 +733,23 @@ export function createDefaultHospitalFlow(
   const menuNode = createDefaultNode("IVR_MENU", { x: 880, y: 220 }, defaults);
   
   const emergencyNode = createDefaultNode("EMERGENCY_HANDLING", { x: 1220, y: 50 }, defaults);
+  if (hospitalId === "hosp_daya_thrissur") {
+    (emergencyNode.data as unknown as EmergencyHandlingNodeData).autoTransfer = true;
+    (emergencyNode.data as unknown as EmergencyHandlingNodeData).isConfirmedDestination = true;
+    (emergencyNode.data as unknown as EmergencyHandlingNodeData).casualtyDestinationNumber =
+      process.env.DAYA_CASUALTY_NUMBER || "+919606654032";
+  }
+
   const aiAgentNode = createDefaultNode("AI_VOICE_AGENT", { x: 1220, y: 200 }, defaults);
   (aiAgentNode.data as unknown as AiVoiceAgentNodeData).agentId = defaultAgentId;
 
   const deptNode = createDefaultNode("DEPARTMENT_SELECTION", { x: 1220, y: 350 }, defaults);
   const transferNode = createDefaultNode("HUMAN_TRANSFER", { x: 1220, y: 500 }, defaults);
+  if (hospitalId === "hosp_daya_thrissur") {
+    (transferNode.data as unknown as HumanTransferNodeData).destinationNumber =
+      process.env.DAYA_RECEPTION_NUMBER || "+919606654032";
+    (transferNode.data as unknown as HumanTransferNodeData).transferType = "PHONE_NUMBER";
+  }
 
   const timeoutNode = createDefaultNode("TIMEOUT", { x: 880, y: 480 }, defaults);
   const invalidNode = createDefaultNode("INVALID_INPUT", { x: 880, y: 620 }, defaults);

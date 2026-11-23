@@ -179,6 +179,7 @@ export class IvrFlowExecutionEngine {
         });
 
         const emData = emergencyNode.data as unknown as EmergencyHandlingNodeData;
+        const fallbackDayaEmergency = context.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : undefined;
         const text =
           context.currentLanguage === "en-IN"
             ? (emData.announcementEnglish || "Connecting you immediately to the Casualty department.")
@@ -191,10 +192,49 @@ export class IvrFlowExecutionEngine {
           audioLanguage: context.currentLanguage,
           transferDestination:
             emData.casualtyDestinationNumber ||
+            fallbackDayaEmergency ||
             (context.variables.casualtyHotline as string) ||
             undefined,
           logMessage: `[EMERGENCY OVERRIDE] Casualty fast-track activated. Transferring to Casualty.`,
           isTerminal: false,
+          context,
+        };
+      }
+    }
+
+    // ----------------------------------------------------
+    // 1b. GLOBAL HUMAN STAFF HANDOFF OVERRIDE
+    // ----------------------------------------------------
+    if (input.type === "AI_HANDOFF") {
+      const transferNode = flow.nodes.find((n) => n.type === "HUMAN_TRANSFER");
+      if (transferNode) {
+        context.currentNodeId = transferNode.id;
+        context.history.push({
+          nodeId: transferNode.id,
+          nodeType: transferNode.type,
+          nodeTitle: transferNode.title,
+          timestamp: new Date().toISOString(),
+          actionTaken: "HUMAN_TRANSFER_OVERRIDE",
+          inputReceived: input.value,
+        });
+
+        const trData = transferNode.data as unknown as HumanTransferNodeData;
+        const fallbackDayaNumber = context.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : undefined;
+        const transferDestination = trData.destinationNumber || fallbackDayaNumber || "Reception";
+
+        const transferMsg =
+          context.currentLanguage === "en-IN"
+            ? "Connecting you to our hospital reception. Please hold."
+            : "ഞങ്ങളുടെ റിസപ്ഷനിലേക്ക് കണക്ട് ചെയ്യുന്നു. ദയവായി കാത്തിരിക്കുക.";
+
+        return {
+          nextNodeId: transferNode.id,
+          action: "TRANSFER_CALL",
+          audioText: transferMsg,
+          audioLanguage: context.currentLanguage,
+          transferDestination,
+          logMessage: `[STAFF HANDOFF OVERRIDE] Routing caller directly to ${transferDestination}.`,
+          isTerminal: true,
           context,
         };
       }
@@ -380,7 +420,12 @@ export class IvrFlowExecutionEngine {
       case "HUMAN_TRANSFER": {
         const trData = currentNode.data as unknown as HumanTransferNodeData;
         actionResult = "TRANSFER_CALL";
-        transferDestination = trData.destinationNumber || "Reception";
+        const fallbackDayaNumber = context.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : undefined;
+        transferDestination = trData.destinationNumber || fallbackDayaNumber || "Reception";
+        audioText =
+          context.currentLanguage === "en-IN"
+            ? "Connecting you to our hospital reception. Please hold."
+            : "ഞങ്ങളുടെ റിസപ്ഷനിലേക്ക് കണക്ട് ചെയ്യുന്നു. ദയവായി കാത്തിരിക്കുക.";
 
         if (input.type === "TRANSFER_FAILED") {
           const edge = flow.edges.find(
@@ -401,7 +446,8 @@ export class IvrFlowExecutionEngine {
       case "EMERGENCY_HANDLING": {
         const emData = currentNode.data as unknown as EmergencyHandlingNodeData;
         actionResult = "EMERGENCY_ESCALATE";
-        transferDestination = emData.casualtyDestinationNumber;
+        const fallbackDayaEmergency = context.hospitalId === "hosp_daya_thrissur" ? "+919606654032" : undefined;
+        transferDestination = emData.casualtyDestinationNumber || fallbackDayaEmergency;
         audioText = context.currentLanguage === "en-IN" ? emData.announcementEnglish : emData.announcementMalayalam;
 
         const edge = flow.edges.find(

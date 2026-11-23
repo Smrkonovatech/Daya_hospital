@@ -179,8 +179,111 @@ export class AgentStreamMediaGateway {
             },
             activeSessions: mediaSessionManager.getAllActiveSessions().map((s) => s.getSummary()),
             recentCompletedCalls: mediaSessionManager.getRecentCompletedSessions(),
+            recentEscalations: mediaSessionManager.getRecentEscalations(15),
             recentUpgrades: this.recentUpgrades.slice(-25),
             recentEvents: this.recentEvents.slice(-35),
+          })
+        );
+        return;
+      }
+
+      // 3. Exotel Passthru Applet decision endpoint (GET & POST)
+      const isPassthruPath =
+        url.pathname === "/exotel/passthru" ||
+        url.pathname === "/api/telephony/passthru-routing" ||
+        url.pathname === "/passthru";
+
+      if (isPassthruPath) {
+        let callSid =
+          url.searchParams.get("CallSid") ||
+          url.searchParams.get("call_sid") ||
+          url.searchParams.get("callSid") ||
+          url.searchParams.get("Sid") ||
+          "";
+        let callerNumber =
+          url.searchParams.get("From") ||
+          url.searchParams.get("CallFrom") ||
+          url.searchParams.get("from") ||
+          "";
+
+        if (req.method === "POST") {
+          try {
+            const bodyChunks: Buffer[] = [];
+            for await (const chunk of req) {
+              bodyChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+            }
+            const bodyStr = Buffer.concat(bodyChunks).toString("utf8");
+            if (bodyStr) {
+              try {
+                const jsonBody = JSON.parse(bodyStr);
+                callSid = jsonBody.CallSid || jsonBody.call_sid || jsonBody.callSid || callSid;
+                callerNumber = jsonBody.From || jsonBody.CallFrom || jsonBody.from || callerNumber;
+              } catch {
+                const formParams = new URLSearchParams(bodyStr);
+                callSid =
+                  formParams.get("CallSid") ||
+                  formParams.get("call_sid") ||
+                  formParams.get("callSid") ||
+                  formParams.get("Sid") ||
+                  callSid;
+                callerNumber =
+                  formParams.get("From") ||
+                  formParams.get("CallFrom") ||
+                  formParams.get("from") ||
+                  callerNumber;
+              }
+            }
+          } catch (bodyErr) {
+            console.warn("[MediaGateway:Passthru] Error parsing POST body:", bodyErr);
+          }
+        }
+
+        const escalation = await mediaSessionManager.getEscalation(callSid, callerNumber);
+        const shouldTransfer = Boolean(
+          escalation &&
+          (escalation.escalationState === "EMERGENCY" || escalation.escalationState === "HUMAN_TRANSFER")
+        );
+
+        console.log(
+          `[MediaGateway:Passthru] Routing Decision for CallSid='${callSid || "N/A"}', From='${callerNumber || "N/A"}': ` +
+          `${shouldTransfer ? "PASS (HTTP 200 -> Connect Applet)" : "FAIL (HTTP 302/410 -> Hangup Applet)"} ` +
+          `[state=${escalation?.escalationState || "NONE"}, destination=${escalation?.destination || "NONE"}, reason="${escalation?.reason || "Normal call completion"}"]`
+        );
+
+        if (shouldTransfer && escalation) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              status: "PASS",
+              statusCode: 200,
+              transfer: true,
+              action: "CONNECT",
+              escalationState: escalation.escalationState,
+              destination: escalation.destination,
+              reason: escalation.reason,
+              callSid: escalation.callSid,
+              timestamp: new Date(escalation.timestamp).toISOString(),
+            })
+          );
+          return;
+        }
+
+        // Return HTTP 302 (Exotel Choice B default) or HTTP 410 (custom fail code) -> Hangup Applet
+        const failStatusCode = Number(url.searchParams.get("failCode")) || 302;
+        res.writeHead(failStatusCode, {
+          "Content-Type": "application/json",
+          "Location": "#",
+        });
+        res.end(
+          JSON.stringify({
+            status: "FAIL",
+            statusCode: failStatusCode,
+            transfer: false,
+            action: "HANGUP",
+            escalationState: "NONE",
+            reason: "Normal call completion or no escalation requested",
+            callSid: callSid || "unknown",
+            timestamp: new Date().toISOString(),
           })
         );
         return;
