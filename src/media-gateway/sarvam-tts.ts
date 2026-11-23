@@ -64,6 +64,14 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
 
     // In Mock Mode or when API key is not configured, return test audio
     if (!this.config.isConfigured) {
+      if (
+        process.env.NODE_ENV === "production" ||
+        process.env.RAILWAY_ENVIRONMENT === "production"
+      ) {
+        console.error(
+          `[SarvamTTS:MOCK_MODE_WARNING] Synthesize requested for text "${trimmed.slice(0, 30)}..." but SARVAM_API_KEY is not configured in production!`
+        );
+      }
       return this.generateMockAudio(trimmed);
     }
 

@@ -17,6 +17,7 @@ import {
   getSarvamConfig,
   getSarvamConfigSummary,
   maskSecret,
+  evaluateGatewayReadiness,
 } from "./sarvam-config";
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { SarvamSpeechToTextProvider } from "./sarvam-stt";
@@ -62,6 +63,55 @@ describe("Sarvam Configuration & Secret Masking", () => {
     const json = JSON.stringify(summary);
     expect(json).not.toContain("sk_l0nfgdq0_MRxkA28Stuh6JXP2AE4Anbcp");
     expect(json).not.toContain("sk_samvaad_xywpvl90_4qRfmMh1fcGrL9XcM48TdBbF");
+  });
+
+  describe("Gateway Readiness & Production Mock-Mode Prevention", () => {
+    it("reports NOT_READY when Sarvam API key is not configured", () => {
+      const unconfigured = getSarvamConfig({ apiKey: "" });
+      const readiness = evaluateGatewayReadiness(
+        unconfigured,
+        { status: "HEALTHY", unpersistedSessionCount: 0 },
+        true
+      );
+      expect(readiness.state).toBe("NOT_READY");
+      expect(readiness.sarvamConfigured).toBe(false);
+      expect(readiness.sarvamMode).toBe("MOCK_MODE");
+    });
+
+    it("reports DEGRADED when Sarvam is configured but database persistence is degraded or missing", () => {
+      const configured = getSarvamConfig({ apiKey: "sk_test_123456789012345" });
+      const readinessDegraded = evaluateGatewayReadiness(
+        configured,
+        { status: "DEGRADED", unpersistedSessionCount: 3 },
+        true
+      );
+      expect(readinessDegraded.state).toBe("DEGRADED");
+      expect(readinessDegraded.sarvamConfigured).toBe(true);
+      expect(readinessDegraded.persistenceStatus).toBe("DEGRADED");
+      expect(readinessDegraded.unpersistedSessionCount).toBe(3);
+
+      const readinessNoDb = evaluateGatewayReadiness(
+        configured,
+        { status: "HEALTHY", unpersistedSessionCount: 0 },
+        false
+      );
+      expect(readinessNoDb.state).toBe("DEGRADED");
+      expect(readinessNoDb.databaseConfigured).toBe(false);
+    });
+
+    it("reports READY when both Sarvam and PostgreSQL persistence are fully configured and healthy", () => {
+      const configured = getSarvamConfig({ apiKey: "sk_test_123456789012345" });
+      const readiness = evaluateGatewayReadiness(
+        configured,
+        { status: "HEALTHY", unpersistedSessionCount: 0 },
+        true
+      );
+      expect(readiness.state).toBe("READY");
+      expect(readiness.sarvamConfigured).toBe(true);
+      expect(readiness.persistenceStatus).toBe("HEALTHY");
+      expect(readiness.databaseConfigured).toBe(true);
+      expect(readiness.reason).toContain("operational");
+    });
   });
 });
 

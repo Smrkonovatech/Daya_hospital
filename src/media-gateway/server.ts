@@ -17,7 +17,11 @@ import {
 } from "./types";
 import { CallMediaSession, mediaSessionManager } from "./session-manager";
 import { AudioEngine } from "./audio-engine";
-import { getSarvamConfigSummary } from "./sarvam-config";
+import {
+  getSarvamConfig,
+  getSarvamConfigSummary,
+  evaluateGatewayReadiness,
+} from "./sarvam-config";
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { ivrFlowService } from "@/lib/services/ivr-flow-service";
 
@@ -80,11 +84,20 @@ export class AgentStreamMediaGateway {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
       if (url.pathname === "/health" || url.pathname === "/healthz") {
+        const sarvam = getSarvamConfig();
+        const persistence = ivrFlowService.getPersistenceHealth();
+        const readiness = evaluateGatewayReadiness(sarvam, persistence);
+
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
             status: "ok",
             service: "smrkomed_exotel_media_gateway",
+            readiness: readiness.state,
+            readinessReason: readiness.reason,
+            sarvamConfigured: sarvam.isConfigured,
+            mode: sarvam.mode,
+            persistenceStatus: persistence.status,
             activeCalls: mediaSessionManager.getActiveSessionCount(),
             uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
             port: this.config.port,
@@ -95,13 +108,22 @@ export class AgentStreamMediaGateway {
       }
 
       if (url.pathname === "/" || url.pathname === "/status") {
+        const sarvam = getSarvamConfig();
+        const persistence = ivrFlowService.getPersistenceHealth();
+        const readiness = evaluateGatewayReadiness(sarvam, persistence);
+
         res.writeHead(200, { "Content-Type": "application/json" });
         const includeDetailedMetrics = url.searchParams.get("metrics") === "true";
         res.end(
           JSON.stringify({
             name: "Smrkomed Exotel Voicebot Media Gateway",
-            version: "1.3.0",
+            version: "1.3.1",
             status: "ONLINE",
+            readiness: readiness.state,
+            readinessReason: readiness.reason,
+            mockModeBlocked:
+              process.env.NODE_ENV === "production" ||
+              process.env.RAILWAY_ENVIRONMENT === "production",
             streamingPath: this.config.path,
             echoMode: this.config.echoMode,
             autoPlayGreeting: this.config.autoPlayGreeting,
@@ -116,7 +138,7 @@ export class AgentStreamMediaGateway {
                 .getAllActiveSessions()
                 .filter((s) => !s.isExecutingIvrFlow).length,
             },
-            persistence: ivrFlowService.getPersistenceHealth(),
+            persistence: persistence,
             latencyTelemetry: {
               aggregates: mediaSessionManager.getAggregateLatencyStats(),
               recentTurnMetrics: mediaSessionManager.getRecentTurnMetrics(

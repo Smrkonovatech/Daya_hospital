@@ -63,6 +63,14 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
    */
   public async connect(): Promise<void> {
     if (!this.config.isConfigured) {
+      if (
+        process.env.NODE_ENV === "production" ||
+        process.env.RAILWAY_ENVIRONMENT === "production"
+      ) {
+        console.error(
+          "[SarvamSTT:MOCK_MODE_WARNING] STT connect requested but SARVAM_API_KEY is not configured in production! Mock STT will be used."
+        );
+      }
       // Mock mode: immediately mark connected without network
       this.isConnected = true;
       return;
