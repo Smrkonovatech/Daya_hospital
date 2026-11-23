@@ -444,6 +444,13 @@ export class CallMediaSession extends EventEmitter {
     if (this.isStopped) return;
 
     switch (stepResult.action) {
+      case "CONTINUE": {
+        if (stepResult.nextNodeId && !stepResult.isTerminal && !this.isStopped) {
+          await this.executeIvrStep({ type: "START_CALL" });
+        }
+        break;
+      }
+
       case "PLAY_AUDIO": {
         this.waitingForDtmf = false;
         if (stepResult.audioText) {

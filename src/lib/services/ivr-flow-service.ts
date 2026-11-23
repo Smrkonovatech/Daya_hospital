@@ -167,9 +167,11 @@ export class IvrFlowService {
       return null;
     }
 
-    // 2. Select matching flow: prefer Exotel Applet ID match, else default flow, else first published
+    // 2. Select matching flow: prefer default flow with matching appletId, else default flow, else first published
     let selectedFlow = exotelAppletId
-      ? publishedFlows.find((f) => f.exotelMapping?.appletId === exotelAppletId)
+      ? publishedFlows.find((f) => f.exotelMapping?.appletId === exotelAppletId && f.isDefault && f.id.includes("main_inbound")) ||
+        publishedFlows.find((f) => f.exotelMapping?.appletId === exotelAppletId && f.isDefault) ||
+        publishedFlows.find((f) => f.exotelMapping?.appletId === exotelAppletId)
       : undefined;
 
     if (!selectedFlow) {
