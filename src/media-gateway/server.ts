@@ -15,7 +15,7 @@ import {
   ExotelMediaFormat,
   MediaGatewayConfig,
 } from "./types";
-import { CallMediaSession, mediaSessionManager } from "./session-manager";
+import { CallMediaSession, mediaSessionManager, SocketSender } from "./session-manager";
 import { AudioEngine } from "./audio-engine";
 import {
   getSarvamConfig,
@@ -326,16 +326,30 @@ export class AgentStreamMediaGateway {
               meta.call_sid || meta.callSid || rawObj.call_sid || rawObj.callSid || ""
             );
 
-            // Idempotency check: guard against duplicate start events for the same stream or call
+            // Idempotency & Reconnection check: guard against duplicate start events for the same stream or call
             const existingSession =
               mediaSessionManager.getSessionByStream(streamSid) ||
               (callSid ? mediaSessionManager.getSessionByCallSid(callSid) : undefined);
 
             if (existingSession) {
-              console.log(
-                `[SMRKOMED Gateway] Idempotent ignore: active session already exists for stream "${streamSid}" / call "${callSid}"`
-              );
-              break;
+              if (existingSession.isStopped) {
+                console.log(
+                  `[SMRKOMED Gateway] Cleaning up stopped session for stream "${streamSid}" / call "${callSid}"`
+                );
+                mediaSessionManager.unregisterSession(existingSession);
+              } else if (existingSession.socket !== (ws as unknown as SocketSender)) {
+                console.log(
+                  `[SMRKOMED Gateway] Re-binding existing active session for call "${callSid}" to new WebSocket.`
+                );
+                existingSession.updateSocket(ws);
+                activeSession = existingSession;
+                break;
+              } else {
+                console.log(
+                  `[SMRKOMED Gateway] Idempotent ignore: active session already exists for stream "${streamSid}" / call "${callSid}" on same socket`
+                );
+                break;
+              }
             }
             const accountSid = String(
               meta.account_sid || meta.accountSid || rawObj.account_sid || rawObj.accountSid || ""

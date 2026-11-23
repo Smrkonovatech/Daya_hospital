@@ -36,6 +36,8 @@ const inMemoryExecutionSessions = new Map<string, unknown>();
 
 export interface PersistenceHealthStatus {
   status: "HEALTHY" | "DEGRADED";
+  isDurable: boolean;
+  bufferingMode: "DATABASE_DURABLE" | "NON_DURABLE_IN_MEMORY";
   unpersistedSessionCount: number;
   lastFailureTime?: string;
   lastFailureError?: string;
@@ -361,8 +363,11 @@ export class IvrFlowService {
    * Returns live persistence health and unpersisted reconciliation metrics.
    */
   public getPersistenceHealth(): PersistenceHealthStatus {
+    const isDurable = persistenceState === "HEALTHY" && unpersistedExecutionSessions.size === 0;
     return {
       status: persistenceState,
+      isDurable,
+      bufferingMode: isDurable ? "DATABASE_DURABLE" : "NON_DURABLE_IN_MEMORY",
       unpersistedSessionCount: unpersistedExecutionSessions.size,
       lastFailureTime: lastPersistenceErrorDetails?.time,
       lastFailureError: lastPersistenceErrorDetails?.error,

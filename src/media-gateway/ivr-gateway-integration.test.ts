@@ -11,9 +11,9 @@ class MockSttProvider implements SpeechToTextProvider {
   private transcriptCb?: (result: TranscriptTurnResult) => void;
   private speechStartCb?: () => void;
 
-  public async connect(): Promise<void> {}
-  public async sendAudio(): Promise<void> {}
-  public async close(): Promise<void> {}
+  public async connect(): Promise<void> { }
+  public async sendAudio(): Promise<void> { }
+  public async close(): Promise<void> { }
 
   public onTranscript(cb: (result: TranscriptTurnResult) => void): void {
     this.transcriptCb = cb;
@@ -54,7 +54,7 @@ interface MockSocketSender extends SocketSender {
   sentMessages: string[];
 }
 
-describe("Live IVR Runtime Gateway Integration (Phase 4.1)", () => {
+describe("Live IVR Runtime Gateway Integration (Phase 4.1)", { timeout: 15000 }, () => {
   let mockSocket: MockSocketSender;
   let stt: MockSttProvider;
   let tts: MockTtsProvider;

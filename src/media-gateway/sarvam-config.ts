@@ -125,7 +125,7 @@ export interface GatewayReadinessInfo {
  * Strict rules:
  * - NOT_READY: Sarvam AI is not configured. Live patient calls cannot proceed in MOCK_MODE.
  * - DEGRADED: Sarvam AI is configured, but PostgreSQL database is missing, disconnected, or degraded.
- *             Calls can proceed with in-memory persistence buffering.
+ *             Calls can proceed with non-durable in-memory fallback persistence buffering.
  * - READY: Both Sarvam AI and PostgreSQL persistence are fully configured and connected.
  */
 export function evaluateGatewayReadiness(
@@ -157,7 +157,7 @@ export function evaluateGatewayReadiness(
     return {
       state: "DEGRADED",
       reason:
-        "Sarvam AI operational (live speech STT & TTS ready). PostgreSQL database disconnected or degraded; execution logs buffered in durable in-memory reconciliation queue.",
+        "Sarvam AI operational (live speech STT & TTS ready). PostgreSQL database disconnected or degraded; execution logs buffered in non-durable in-memory fallback queue. In-memory buffering is volatile and will not survive process restarts.",
       environmentMode,
       sarvamConfigured: true,
       sarvamMode: "PRODUCTION",

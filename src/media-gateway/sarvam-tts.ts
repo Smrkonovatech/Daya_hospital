@@ -47,9 +47,10 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
       voiceId?: string;
       pitch?: number;
       pace?: number;
+      signal?: AbortSignal;
     }
   ): Promise<Buffer> {
-    if (!text || !text.trim()) {
+    if (!text || !text.trim() || options?.signal?.aborted) {
       return Buffer.alloc(0);
     }
 
@@ -94,6 +95,7 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        signal: options?.signal,
       });
 
       if (!res.ok) {
@@ -120,6 +122,9 @@ export class SarvamTextToSpeechProvider implements TextToSpeechProvider {
 
       return pcmBuffer;
     } catch (err: unknown) {
+      if (options?.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        return Buffer.alloc(0);
+      }
       console.error("[SarvamTTS] Network or processing error:", err instanceof Error ? err.message : err);
       return this.generateMockAudio(trimmed);
     }

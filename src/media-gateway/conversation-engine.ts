@@ -112,9 +112,17 @@ export class HospitalConversationEngine {
    */
   public async processCallerUtterance(
     callerText: string,
-    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void
+    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void,
+    signal?: AbortSignal
   ): Promise<ConversationResult> {
     const text = (callerText || "").trim();
+    if (signal?.aborted) {
+      return {
+        replyText: "",
+        intent: "GENERAL",
+        shouldTransfer: false,
+      };
+    }
     this.turnCount++;
     this.history.push({ role: "user", content: text, timestamp: Date.now() });
 
@@ -203,7 +211,7 @@ export class HospitalConversationEngine {
     // 3. SARVAM-NATIVE CONVERSATIONAL REASONING (SARVAM-105B)
     // ----------------------------------------------------
     if (this.sarvamConfig.isConfigured) {
-      const llmResult = await this.querySarvamLlm(text, onSentenceChunk);
+      const llmResult = await this.querySarvamLlm(text, onSentenceChunk, signal);
       let replyText = llmResult.fullText.trim();
       let firstSentenceText = llmResult.firstSentence.trim();
 
@@ -211,29 +219,26 @@ export class HospitalConversationEngine {
       let shouldTransfer = false;
       let transferDestination: string | undefined;
 
-      // Parse structured action tags if returned by Sarvam LLM
-      if (replyText.includes("[TRANSFER_STAFF]")) {
+      // Parse structured action tags & caller intent
+      if (this.isDoctorInfoInquiry(lower)) {
+        intent = "DOCTOR_INFO";
+      } else if (this.isFeesInquiry(lower)) {
+        intent = "FEES";
+      } else if (this.isAppointmentIntent(lower) || replyText.includes("[APPOINTMENT]")) {
+        intent = "APPOINTMENT";
+      } else if (replyText.includes("[TRANSFER_STAFF]")) {
         intent = "STAFF_TRANSFER";
         shouldTransfer = true;
         transferDestination = "201";
-        replyText = replyText.replace(/\[TRANSFER_STAFF\]/g, "").trim();
-        firstSentenceText = firstSentenceText.replace(/\[TRANSFER_STAFF\]/g, "").trim();
       } else if (replyText.includes("[EMERGENCY_DETECTED]") || replyText.includes("[CASUALTY]")) {
         intent = "CASUALTY";
         const isConfirmed = process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true";
         shouldTransfer = isConfirmed;
         transferDestination = isConfirmed ? this.hospitalConfig.routing.casualtyDirectNumber : undefined;
-        replyText = replyText.replace(/\[EMERGENCY_DETECTED\]|\[CASUALTY\]/g, "").trim();
-        firstSentenceText = firstSentenceText.replace(/\[EMERGENCY_DETECTED\]|\[CASUALTY\]/g, "").trim();
-      } else if (this.isAppointmentIntent(lower) || replyText.includes("[APPOINTMENT]")) {
-        intent = "APPOINTMENT";
-        replyText = replyText.replace(/\[APPOINTMENT\]/g, "").trim();
-        firstSentenceText = firstSentenceText.replace(/\[APPOINTMENT\]/g, "").trim();
-      } else if (this.isDoctorInfoInquiry(lower)) {
-        intent = "DOCTOR_INFO";
-      } else if (this.isFeesInquiry(lower)) {
-        intent = "FEES";
       }
+
+      replyText = replyText.replace(/\[TRANSFER_STAFF\]|\[EMERGENCY_DETECTED\]|\[CASUALTY\]|\[APPOINTMENT\]/g, "").trim();
+      firstSentenceText = firstSentenceText.replace(/\[TRANSFER_STAFF\]|\[EMERGENCY_DETECTED\]|\[CASUALTY\]|\[APPOINTMENT\]/g, "").trim();
 
       if (replyText) {
         this.history.push({ role: "assistant", content: replyText, timestamp: llmResult.llmResponseReadyMs });
@@ -424,7 +429,8 @@ export class HospitalConversationEngine {
    */
   private async querySarvamLlm(
     userPrompt: string,
-    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void
+    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void,
+    signal?: AbortSignal
   ): Promise<{
     fullText: string;
     firstSentence: string;
@@ -483,6 +489,7 @@ VOICE TELEPHONY RULES:
           max_tokens: 120,
           stream: true,
         }),
+        signal,
       });
 
       if (res.ok && res.body) {
@@ -495,6 +502,10 @@ VOICE TELEPHONY RULES:
         let lastEmittedIndex = 0;
 
         while (true) {
+          if (signal?.aborted) {
+            reader.cancel().catch(() => {});
+            break;
+          }
           const { done, value } = await reader.read();
           if (done) break;
 

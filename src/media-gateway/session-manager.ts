@@ -127,10 +127,19 @@ export class CallMediaSession extends EventEmitter {
   private executionSessionId?: string;
   private ivrService: IvrFlowService;
 
-  private socket: SocketSender;
+  public socket: SocketSender;
   private audioEngine: AudioEngine;
-  private playbackQueue: AudioPlaybackQueue;
+  public readonly playbackQueue: AudioPlaybackQueue;
   private autoPlayGreeting: boolean;
+
+  // Phase 9.2: Authoritative Turn Controller, Sequence ID & Overlap Safeguards
+  public currentTurnSequenceId = 0;
+  private currentTurnAbortController: AbortController | null = null;
+  public isTurnActive = false;
+  private lastProcessedTranscriptText = "";
+  private lastProcessedTranscriptTime = 0;
+  private lastSpeechStartTimestamp = 0;
+  private lastAiResponseTimestamp = 0;
 
   constructor(options: CallSessionInitOptions) {
     super();
@@ -243,6 +252,13 @@ export class CallMediaSession extends EventEmitter {
 
       if (turn.isFinal && turn.text.trim()) {
         const text = turn.text.trim();
+
+        // SAFEGUARD 6: Deduplication of rapid duplicate final STT events
+        if (this.isDuplicateUtterance(text, turn)) {
+          console.log(`[CallSession ${this.callSid}] Ignored duplicate final STT event: "${text.substring(0, 40)}"`);
+          return;
+        }
+
         this.conversationTurns.push({
           speaker: "caller",
           text,
@@ -290,6 +306,10 @@ export class CallMediaSession extends EventEmitter {
             this.handleDtmf(recognizedDigit);
             return;
           }
+
+          // SAFEGUARD 1: Caller spoke conversational words rather than a DTMF digit.
+          // Disarm the DTMF timeout timer immediately so it cannot fire later!
+          this.disarmDtmfWait("conversational_speech");
         }
 
         await this.handleUserTurn(text, turn);
@@ -300,6 +320,7 @@ export class CallMediaSession extends EventEmitter {
       (this.sttProvider as unknown as { onSpeechStart: (cb: () => void) => void }).onSpeechStart(
         () => {
           this.callerSpeechStartMs = Date.now();
+          this.lastSpeechStartTimestamp = Date.now();
           if (this.ttsStatus === "PLAYING" || this.playbackQueue.hasPending()) {
             this.interruptPlayback();
           }
@@ -343,7 +364,58 @@ export class CallMediaSession extends EventEmitter {
   }
 
   public get isInterrupted(): boolean {
-    return (this.ttsStatus as string) === "INTERRUPTED";
+    return (this.ttsStatus as string) === "INTERRUPTED" || this.playbackQueue.isCurrentlyInterrupted;
+  }
+
+  public updateSocket(newSocket: SocketSender): void {
+    console.log(`[CallSession ${this.callSid}] Re-bound WebSocket instance.`);
+    this.socket = newSocket;
+  }
+
+  public disarmDtmfWait(reason = "caller_speech"): void {
+    if (this.waitingForDtmf || this.dtmfTimeoutTimer) {
+      console.log(`[CallSession ${this.callSid}] Disarmed DTMF wait and timer (${reason}).`);
+      if (this.dtmfTimeoutTimer) {
+        clearTimeout(this.dtmfTimeoutTimer);
+        this.dtmfTimeoutTimer = undefined;
+      }
+      this.waitingForDtmf = false;
+      if (this.isExecutingIvrFlow) {
+        this.isExecutingIvrFlow = false;
+      }
+    }
+  }
+
+  public isDuplicateUtterance(text: string, _turn?: TranscriptTurnResult): boolean {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return true;
+    const now = Date.now();
+
+    // If an AI response has completed since the last caller turn, this is a legitimate subsequent turn
+    if (this.lastAiResponseTimestamp > this.lastProcessedTranscriptTime) {
+      this.lastProcessedTranscriptText = trimmed;
+      this.lastProcessedTranscriptTime = now;
+      return false;
+    }
+
+    // If a new physical speech start burst was detected by VAD since last processed turn, it is a new utterance
+    if (this.lastSpeechStartTimestamp > this.lastProcessedTranscriptTime) {
+      this.lastProcessedTranscriptText = trimmed;
+      this.lastProcessedTranscriptTime = now;
+      return false;
+    }
+
+    // Deduplicate rapid twin final events for the same speech segment within 600ms
+    if (
+      trimmed === this.lastProcessedTranscriptText &&
+      now - this.lastProcessedTranscriptTime < 600
+    ) {
+      return true;
+    }
+
+    this.lastProcessedTranscriptText = trimmed;
+    this.lastProcessedTranscriptTime = now;
+    return false;
   }
 
   /**
@@ -404,6 +476,10 @@ export class CallMediaSession extends EventEmitter {
    */
   public async executeIvrStep(input: StepInputEvent): Promise<FlowExecutionStepResult | null> {
     if (!this.ivrFlow || !this.ivrContext || this.isStopped) return null;
+    if (input.type === "TIMEOUT" && (!this.isExecutingIvrFlow || this.isTurnActive || !this.waitingForDtmf)) {
+      console.log(`[CallSession ${this.callSid}] Ignored stale IVR TIMEOUT event because conversational turn is active or DTMF was disarmed.`);
+      return null;
+    }
 
     if (this.isExecutingStep) {
       await new Promise((r) => setTimeout(r, 60));
@@ -442,8 +518,12 @@ export class CallMediaSession extends EventEmitter {
    */
   public async processIvrAction(stepResult: FlowExecutionStepResult): Promise<void> {
     if (this.isStopped) return;
+    if ((!this.isExecutingIvrFlow || this.isTurnActive) && stepResult.action === "PLAY_AUDIO") {
+      console.log(`[CallSession ${this.callSid}] Suppressed IVR PLAY_AUDIO because conversational AI is active.`);
+      return;
+    }
 
-    switch (stepResult.action) {
+    switch (stepResult.action as string) {
       case "CONTINUE": {
         if (stepResult.nextNodeId && !stepResult.isTerminal && !this.isStopped) {
           await this.executeIvrStep({ type: "START_CALL" });
@@ -820,8 +900,25 @@ export class CallMediaSession extends EventEmitter {
   public async handleUserTurn(text: string, turnInfo?: TranscriptTurnResult): Promise<void> {
     if (this.isStopped) return;
 
+    // SAFEGUARD 1: Disarm any waiting DTMF input or timer immediately
+    this.disarmDtmfWait("handle_user_turn");
+
+    // SAFEGUARD 2, 4 & 5: Turn Controller Mutex & Abort Controller
+    if (this.currentTurnAbortController) {
+      this.currentTurnAbortController.abort();
+      this.currentTurnAbortController = null;
+    }
+
     this.turnCounter++;
     const turnId = this.turnCounter;
+    this.currentTurnSequenceId++;
+    const turnSequenceId = this.currentTurnSequenceId;
+    this.playbackQueue.setActiveTurnSequenceId(turnSequenceId);
+
+    const abortController = new AbortController();
+    this.currentTurnAbortController = abortController;
+    this.isTurnActive = true;
+
     const finalTranscriptMs = turnInfo?.timestampMs || Date.now();
     const lastCallerAudioMs =
       turnInfo?.lastCallerAudioMs || this.lastCallerAudioReceivedMs || finalTranscriptMs - 280;
@@ -843,12 +940,42 @@ export class CallMediaSession extends EventEmitter {
     const cap = LanguageDetector.getCapability(lang);
     const voiceId = cap.ttsVoice;
 
-    // Pipelined sentence playback queue
-    let playbackChain: Promise<void> = Promise.resolve();
+    // SAFEGUARD 8: Ordered sentence synthesis & sequential playback queue
     let sentenceCountDispatched = 0;
+    const sentencePcmMap = new Map<number, Buffer>();
+    let nextSentenceToPlay = 0;
+    let playbackChain: Promise<void> = Promise.resolve();
+
+    const drainOrderedSentences = async () => {
+      while (sentencePcmMap.has(nextSentenceToPlay)) {
+        if (
+          this.isStopped ||
+          abortController.signal.aborted ||
+          this.currentTurnSequenceId !== turnSequenceId
+        ) {
+          break;
+        }
+        const pcm = sentencePcmMap.get(nextSentenceToPlay)!;
+        sentencePcmMap.delete(nextSentenceToPlay);
+        nextSentenceToPlay++;
+        if (pcm && pcm.length > 0) {
+          await this.streamPcmAudio(pcm, turnSequenceId, () => {
+            if (!firstAudioSentToExotelMs) {
+              firstAudioSentToExotelMs = Date.now();
+            }
+          });
+        }
+      }
+    };
 
     const onSentenceChunk = (sentence: string, sIdx: number) => {
-      if (this.isStopped || this.isInterrupted) return;
+      if (
+        this.isStopped ||
+        abortController.signal.aborted ||
+        this.currentTurnSequenceId !== turnSequenceId
+      ) {
+        return;
+      }
       sentenceCountDispatched++;
 
       if (sIdx === 0) {
@@ -856,167 +983,224 @@ export class CallMediaSession extends EventEmitter {
         ttsStartMs = Date.now();
       }
 
-      // Concurrently dispatch sentence synthesis to Sarvam Bulbul TTS
+      // Concurrently dispatch sentence synthesis to Sarvam Bulbul TTS with AbortSignal
       const synthesisPromise = this.ttsProvider
         .synthesize(sentence, {
           language: cap.code,
           voiceId,
+          signal: abortController.signal,
         })
         .then(async (pcmAudio) => {
-          if (this.isStopped || this.isInterrupted) return;
+          if (
+            this.isStopped ||
+            abortController.signal.aborted ||
+            this.currentTurnSequenceId !== turnSequenceId
+          ) {
+            return;
+          }
           if (sIdx === 0 && !ttsFirstAudioMs) {
             ttsFirstAudioMs = Date.now();
           }
           if (pcmAudio && pcmAudio.length > 0) {
-            playbackChain = playbackChain.then(() =>
-              this.streamPcmAudio(pcmAudio, () => {
-                if (!firstAudioSentToExotelMs) {
-                  firstAudioSentToExotelMs = Date.now();
-                }
-              })
-            );
+            sentencePcmMap.set(sIdx, pcmAudio);
+            playbackChain = playbackChain.then(() => drainOrderedSentences());
           }
         })
         .catch((err) => {
+          if (abortController.signal.aborted) return;
           console.warn(`[CallSession ${this.callSid}] Pipelined TTS sentence ${sIdx + 1} error:`, err);
         });
 
       playbackChain = playbackChain.then(() => synthesisPromise);
     };
 
-    const result = await this.conversationEngine.processCallerUtterance(text, onSentenceChunk);
-
-    if (this.isExecutingIvrFlow && result.shouldTransfer) {
-      console.log(
-        `[CallSession ${this.callSid}] AI conversation requested staff handoff (intent=${result.intent}). Routing to IVR handoff.`
+    try {
+      const result = await this.conversationEngine.processCallerUtterance(
+        text,
+        onSentenceChunk,
+        abortController.signal
       );
-      await this.executeIvrStep({ type: "AI_HANDOFF", value: text });
-      return;
-    }
 
-    llmFirstTokenMs = result.llmTimestamps?.llmFirstTokenMs || llmFirstTokenMs || Date.now();
-    llmFirstSentenceMs = result.llmTimestamps?.llmFirstSentenceMs || llmFirstSentenceMs || Date.now();
-    const llmResponseReadyMs = result.llmTimestamps?.llmResponseReadyMs || Date.now();
-
-    this.lastAiResponse = result.replyText;
-
-    this.conversationTurns.push({
-      speaker: "ai",
-      text: result.replyText,
-      timestampMs: Date.now(),
-    });
-
-    this.emit("aiResponse", {
-      streamSid: this.streamSid,
-      text: result.replyText,
-      intent: result.intent,
-      shouldTransfer: result.shouldTransfer,
-      transferDestination: result.transferDestination,
-    });
-
-    if (sentenceCountDispatched > 0) {
-      await playbackChain;
-      lastAudioSentToExotelMs = Date.now();
-      if (!this.isInterrupted) {
-        this.ttsStatus = "IDLE";
+      if (abortController.signal.aborted || this.currentTurnSequenceId !== turnSequenceId) {
+        return;
       }
-    } else {
-      // Direct synthesis fallback if no chunk was streamed
-      ttsStartMs = Date.now();
-      try {
-        const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
-          language: cap.code,
-          voiceId,
-        });
-        ttsFirstAudioMs = Date.now();
-        if (pcmAudio && pcmAudio.length > 0 && !this.isStopped && !this.isInterrupted) {
-          await this.streamPcmAudio(pcmAudio, () => {
-            if (!firstAudioSentToExotelMs) {
-              firstAudioSentToExotelMs = Date.now();
-            }
-          });
-          lastAudioSentToExotelMs = Date.now();
-        }
-      } catch (err) {
-        console.warn(`[CallSession ${this.callSid}] Direct response synthesis error:`, err);
-      } finally {
-        if (!this.isInterrupted) {
+
+      if (this.isExecutingIvrFlow && result.shouldTransfer) {
+        console.log(
+          `[CallSession ${this.callSid}] AI conversation requested staff handoff (intent=${result.intent}). Routing to IVR handoff.`
+        );
+        await this.executeIvrStep({ type: "AI_HANDOFF", value: text });
+        return;
+      }
+
+      llmFirstTokenMs = result.llmTimestamps?.llmFirstTokenMs || llmFirstTokenMs || Date.now();
+      llmFirstSentenceMs = result.llmTimestamps?.llmFirstSentenceMs || llmFirstSentenceMs || Date.now();
+      const llmResponseReadyMs = result.llmTimestamps?.llmResponseReadyMs || Date.now();
+
+      this.lastAiResponse = result.replyText;
+
+      this.conversationTurns.push({
+        speaker: "ai",
+        text: result.replyText,
+        timestampMs: Date.now(),
+      });
+      this.lastAiResponseTimestamp = Date.now();
+
+      this.emit("aiResponse", {
+        streamSid: this.streamSid,
+        text: result.replyText,
+        intent: result.intent,
+        shouldTransfer: result.shouldTransfer,
+        transferDestination: result.transferDestination,
+      });
+
+      if (sentenceCountDispatched > 0) {
+        await playbackChain;
+        await drainOrderedSentences();
+        lastAudioSentToExotelMs = Date.now();
+        if (!this.isInterrupted && !abortController.signal.aborted) {
           this.ttsStatus = "IDLE";
         }
+      } else if (!abortController.signal.aborted && this.currentTurnSequenceId === turnSequenceId) {
+        // Direct synthesis fallback if no chunk was streamed
+        ttsStartMs = Date.now();
+        try {
+          const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
+            language: cap.code,
+            voiceId,
+            signal: abortController.signal,
+          });
+          ttsFirstAudioMs = Date.now();
+          if (
+            pcmAudio &&
+            pcmAudio.length > 0 &&
+            !this.isStopped &&
+            !abortController.signal.aborted &&
+            this.currentTurnSequenceId === turnSequenceId
+          ) {
+            await this.streamPcmAudio(pcmAudio, turnSequenceId, () => {
+              if (!firstAudioSentToExotelMs) {
+                firstAudioSentToExotelMs = Date.now();
+              }
+            });
+            lastAudioSentToExotelMs = Date.now();
+          }
+        } catch (err) {
+          if (!abortController.signal.aborted) {
+            console.warn(`[CallSession ${this.callSid}] Direct response synthesis error:`, err);
+          }
+        } finally {
+          if (!this.isInterrupted && !abortController.signal.aborted) {
+            this.ttsStatus = "IDLE";
+          }
+        }
+      }
+
+      const speechEndToTranscriptMs = Math.max(0, finalTranscriptMs - speechEndVadMs);
+      const transcriptToLlmFirstTokenMs = Math.max(0, (llmFirstTokenMs || llmResponseReadyMs) - finalTranscriptMs);
+      const llmFirstTokenToTtsAudioMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - (llmFirstTokenMs || llmStartMs));
+      const ttsFirstAudioDurationMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - ttsStartMs);
+      const totalSpeechEndToAudibleResponseMs = firstAudioSentToExotelMs > 0
+        ? Math.max(0, firstAudioSentToExotelMs - speechEndVadMs)
+        : Math.max(0, (ttsFirstAudioMs || Date.now()) - speechEndVadMs);
+
+      const turnMetrics: TurnLatencyMetrics = {
+        turnId,
+        callSid: this.callSid,
+        streamSid: this.streamSid,
+        callerTranscript: text,
+        aiResponseText: result.replyText,
+        timestamps: {
+          lastCallerAudioMs,
+          speechEndVadMs,
+          finalTranscriptMs,
+          llmStartMs,
+          llmFirstTokenMs,
+          llmFirstSentenceMs,
+          llmResponseReadyMs,
+          ttsStartMs,
+          ttsFirstAudioMs: ttsFirstAudioMs || ttsStartMs,
+          firstAudioSentToExotelMs: firstAudioSentToExotelMs || ttsFirstAudioMs || ttsStartMs,
+          lastAudioSentToExotelMs: lastAudioSentToExotelMs || firstAudioSentToExotelMs || ttsFirstAudioMs,
+        },
+        latencies: {
+          speechEndToTranscriptMs,
+          transcriptToLlmFirstTokenMs,
+          llmFirstTokenToTtsAudioMs,
+          ttsFirstAudioMs: ttsFirstAudioDurationMs,
+          totalSpeechEndToAudibleResponseMs,
+          firstSentenceLatencyMs: Math.max(0, (llmFirstSentenceMs || Date.now()) - llmStartMs),
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      this.turnLatencyMetrics.push(turnMetrics);
+      mediaSessionManager.recordTurnMetrics(turnMetrics);
+
+      console.log(
+        `[CallSession ${this.callSid}] Turn ${turnId} (seq=${turnSequenceId}) Latency Breakdown: Total=${totalSpeechEndToAudibleResponseMs}ms ` +
+        `(VAD->STT: ${speechEndToTranscriptMs}ms, STT->LLM: ${transcriptToLlmFirstTokenMs}ms, ` +
+        `LLM->TTS: ${llmFirstTokenToTtsAudioMs}ms, TTS: ${ttsFirstAudioDurationMs}ms) | ` +
+        `Caller: "${text}" -> AI: "${result.replyText.substring(0, 40)}..."`
+      );
+    } catch (err: unknown) {
+      if (
+        abortController.signal.aborted ||
+        this.currentTurnSequenceId !== turnSequenceId ||
+        (err instanceof Error && (err.name === "AbortError" || err.message.toLowerCase().includes("abort")))
+      ) {
+        // Expected turn cancellation on interruption or new turn
+        return;
+      }
+      console.warn(`[CallSession ${this.callSid}] Turn ${turnId} execution error:`, err);
+    } finally {
+      this.isTurnActive = false;
+      if (this.currentTurnAbortController === abortController) {
+        this.currentTurnAbortController = null;
       }
     }
-
-    const speechEndToTranscriptMs = Math.max(0, finalTranscriptMs - speechEndVadMs);
-    const transcriptToLlmFirstTokenMs = Math.max(0, (llmFirstTokenMs || llmResponseReadyMs) - finalTranscriptMs);
-    const llmFirstTokenToTtsAudioMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - (llmFirstTokenMs || llmStartMs));
-    const ttsFirstAudioDurationMs = Math.max(0, (ttsFirstAudioMs || Date.now()) - ttsStartMs);
-    const totalSpeechEndToAudibleResponseMs = firstAudioSentToExotelMs > 0
-      ? Math.max(0, firstAudioSentToExotelMs - speechEndVadMs)
-      : Math.max(0, (ttsFirstAudioMs || Date.now()) - speechEndVadMs);
-
-    const turnMetrics: TurnLatencyMetrics = {
-      turnId,
-      callSid: this.callSid,
-      streamSid: this.streamSid,
-      callerTranscript: text,
-      aiResponseText: result.replyText,
-      timestamps: {
-        lastCallerAudioMs,
-        speechEndVadMs,
-        finalTranscriptMs,
-        llmStartMs,
-        llmFirstTokenMs,
-        llmFirstSentenceMs,
-        llmResponseReadyMs,
-        ttsStartMs,
-        ttsFirstAudioMs: ttsFirstAudioMs || ttsStartMs,
-        firstAudioSentToExotelMs: firstAudioSentToExotelMs || ttsFirstAudioMs || ttsStartMs,
-        lastAudioSentToExotelMs: lastAudioSentToExotelMs || firstAudioSentToExotelMs || ttsFirstAudioMs,
-      },
-      latencies: {
-        speechEndToTranscriptMs,
-        transcriptToLlmFirstTokenMs,
-        llmFirstTokenToTtsAudioMs,
-        ttsFirstAudioMs: ttsFirstAudioDurationMs,
-        totalSpeechEndToAudibleResponseMs,
-        firstSentenceLatencyMs: Math.max(0, (llmFirstSentenceMs || Date.now()) - llmStartMs),
-      },
-      timestamp: new Date().toISOString(),
-    };
-
-    this.turnLatencyMetrics.push(turnMetrics);
-    mediaSessionManager.recordTurnMetrics(turnMetrics);
-
-    console.log(
-      `[CallSession ${this.callSid}] Turn ${turnId} Latency Breakdown: Total=${totalSpeechEndToAudibleResponseMs}ms ` +
-      `(VAD->STT: ${speechEndToTranscriptMs}ms, STT->LLM: ${transcriptToLlmFirstTokenMs}ms, ` +
-      `LLM->TTS: ${llmFirstTokenToTtsAudioMs}ms, TTS: ${ttsFirstAudioDurationMs}ms) | ` +
-      `Caller: "${text}" -> AI: "${result.replyText.substring(0, 40)}..."`
-    );
   }
 
   /**
    * Streams a PCM audio buffer to Exotel in compliant chunks (3200 bytes, multiples of 320).
+   * Routes all audio through the authoritative AudioPlaybackQueue to eliminate audio interleaving.
    */
-  public async streamPcmAudio(pcmBuffer: Buffer, onFirstChunkSent?: () => void): Promise<void> {
-    this.ttsStatus = "PLAYING";
-    this.playbackQueue.resetInterruption();
+  public async streamPcmAudio(
+    pcmBuffer: Buffer,
+    turnSequenceIdOrOnFirstChunk?: number | (() => void),
+    onFirstChunkSent?: () => void
+  ): Promise<void> {
+    let activeSeq = this.currentTurnSequenceId;
+    let onFirstSent = onFirstChunkSent;
+    if (typeof turnSequenceIdOrOnFirstChunk === "number") {
+      activeSeq = turnSequenceIdOrOnFirstChunk;
+    } else if (typeof turnSequenceIdOrOnFirstChunk === "function") {
+      onFirstSent = turnSequenceIdOrOnFirstChunk;
+    }
 
+    if (activeSeq !== this.currentTurnSequenceId) {
+      // Discard stale turn audio immediately
+      return;
+    }
+    if (this.isStopped || this.playbackQueue.isCurrentlyInterrupted) {
+      return;
+    }
+
+    this.ttsStatus = "PLAYING";
     const chunks = this.audioEngine.splitIntoExotelChunks(pcmBuffer, 3200);
 
     for (let i = 0; i < chunks.length; i++) {
-      if (this.isStopped || this.isInterrupted) {
-        break;
-      }
-      this.sendOutboundAudio(chunks[i]);
-      if (i === 0 && onFirstChunkSent) {
-        onFirstChunkSent();
-      }
-      // Progressive pacing for 200ms audio chunks
-      await new Promise((r) => setTimeout(r, 180));
+      this.playbackQueue.enqueue(
+        chunks[i],
+        activeSeq,
+        i === 0 ? onFirstSent : undefined
+      );
     }
 
-    if (this.ttsStatus === "PLAYING") {
+    const pacingMs = process.env.NODE_ENV === "test" ? 10 : 180;
+    await this.playbackQueue.playSequential((chunk) => this.sendOutboundAudio(chunk), pacingMs);
+
+    if (!this.playbackQueue.hasPending() && this.ttsStatus === "PLAYING") {
       this.ttsStatus = "IDLE";
     }
   }
@@ -1116,7 +1300,13 @@ export class CallMediaSession extends EventEmitter {
    */
   public interruptPlayback(): void {
     this.bargeInEvents.push({ timestamp: Date.now() });
-    this.playbackQueue.clear();
+    this.currentTurnSequenceId++;
+    if (this.currentTurnAbortController) {
+      this.currentTurnAbortController.abort();
+      this.currentTurnAbortController = null;
+    }
+    this.isTurnActive = false;
+    this.playbackQueue.clear(this.currentTurnSequenceId);
     this.ttsStatus = "INTERRUPTED";
     this.state = "INTERRUPTED";
 
@@ -1181,7 +1371,15 @@ export class CallMediaSession extends EventEmitter {
     this.stoppedAt = new Date();
     this.ttsStatus = "IDLE";
     this.sttStatus = "IDLE";
-    this.playbackQueue.clear();
+
+    // Abort active in-flight turn and purge playback queue
+    this.currentTurnSequenceId++;
+    if (this.currentTurnAbortController) {
+      this.currentTurnAbortController.abort();
+      this.currentTurnAbortController = null;
+    }
+    this.isTurnActive = false;
+    this.playbackQueue.clear(this.currentTurnSequenceId);
 
     if (this.isExecutingIvrFlow && this.ivrContext) {
       this.persistExecutionState(undefined, "COMPLETED").catch(() => {});
@@ -1418,6 +1616,11 @@ export class MediaSessionManager extends EventEmitter {
       medianLlmLatencyMs: median(llms),
       medianTtsLatencyMs: median(ttss),
     };
+  }
+
+  public unregisterSession(session: CallMediaSession): void {
+    this.sessionsByStream.delete(session.streamSid);
+    this.sessionsByCall.delete(session.callSid);
   }
 
   public registerSession(session: CallMediaSession): void {

@@ -47,6 +47,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
   private silenceTimer: NodeJS.Timeout | null = null;
   private accumulatedPcmChunks: Buffer[] = [];
   private currentTurnText = "";
+  private lastFinalTranscriptText = "";
+  private lastFinalTranscriptTimestamp = 0;
 
   constructor(options?: SarvamSttOptions, configOverrides?: Partial<SarvamConfig>) {
     this.config = getSarvamConfig(configOverrides);
@@ -239,6 +241,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
     this.isSpeaking = false;
     this.accumulatedPcmChunks = [];
     this.currentTurnText = "";
+    this.lastFinalTranscriptText = "";
+    this.lastFinalTranscriptTimestamp = 0;
 
     if (this.ws) {
       try {
@@ -268,6 +272,8 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
           this.speechStartCallback();
         }
         this.isSpeaking = true;
+        this.lastFinalTranscriptText = "";
+        this.lastFinalTranscriptTimestamp = 0;
         return;
       }
 
@@ -285,6 +291,26 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
 
       if (transcriptText) {
         this.currentTurnText = transcriptText;
+
+        // SAFEGUARD 6 & 7: Deduplication of final transcripts
+        if (isFinal) {
+          const trimmed = transcriptText.trim();
+          const now = Date.now();
+          if (
+            trimmed &&
+            trimmed === this.lastFinalTranscriptText &&
+            now - this.lastFinalTranscriptTimestamp < 600
+          ) {
+            // Drop duplicate final emission
+            this.currentTurnText = "";
+            return;
+          }
+          this.lastFinalTranscriptText = trimmed;
+          this.lastFinalTranscriptTimestamp = now;
+          this.currentTurnText = ""; // Clear turn text to prevent double emission in finalizeUtterance
+          this.accumulatedPcmChunks = [];
+        }
+
         if (this.transcriptCallback) {
           this.transcriptCallback({
             text: transcriptText,
@@ -328,6 +354,17 @@ export class SarvamSpeechToTextProvider implements SpeechToTextProvider {
       const finalText = this.currentTurnText.trim();
       this.currentTurnText = "";
       this.accumulatedPcmChunks = [];
+
+      const now = Date.now();
+      if (
+        finalText === this.lastFinalTranscriptText &&
+        now - this.lastFinalTranscriptTimestamp < 1500
+      ) {
+        // Drop duplicate utterance already emitted
+        return;
+      }
+      this.lastFinalTranscriptText = finalText;
+      this.lastFinalTranscriptTimestamp = now;
 
       if (this.transcriptCallback) {
         this.transcriptCallback({

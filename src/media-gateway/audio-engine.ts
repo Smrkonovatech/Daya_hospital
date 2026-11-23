@@ -220,31 +220,72 @@ export class AudioEngine {
   }
 }
 
+export interface QueuedAudioItem {
+  chunk: Buffer;
+  turnSequenceId?: number;
+  onFirstChunkSent?: () => void;
+  sentenceIndex?: number;
+}
+
 /**
- * Manages an outbound audio playback queue for an active call session.
- * Supports enqueuing audio chunks, tracking markers, and instant interruption (clear).
+ * Manages an authoritative outbound audio playback queue for an active call session.
+ * Enforces strictly sequential chunk streaming, prevents chunk interleaving, tags
+ * chunks with turnSequenceId to discard stale audio, and supports 0ms abort on barge-in.
  */
 export class AudioPlaybackQueue {
-  private queue: Buffer[] = [];
+  private queue: QueuedAudioItem[] = [];
   private isPlaying = false;
   private isInterrupted = false;
+  private isProcessingQueue = false;
+  private activeTurnSequenceId = 0;
   private totalBytesSent = 0;
+  private currentSleepResolve: (() => void) | null = null;
+  private activeDrainPromise: Promise<void> | null = null;
 
   constructor(private streamSid: string) {}
 
-  public enqueue(chunk: Buffer): void {
-    if (this.isInterrupted) return;
-    this.queue.push(chunk);
+  public setActiveTurnSequenceId(sequenceId: number): void {
+    this.activeTurnSequenceId = sequenceId;
+    // Discard any queued chunks from older or superseded turns
+    this.queue = this.queue.filter(
+      (item) => item.turnSequenceId === undefined || item.turnSequenceId === sequenceId
+    );
   }
 
-  public clear(): void {
+  public getActiveTurnSequenceId(): number {
+    return this.activeTurnSequenceId;
+  }
+
+  public enqueue(chunk: Buffer, turnSequenceId?: number, onFirstChunkSent?: () => void): void {
+    if (this.isInterrupted) return;
+    if (turnSequenceId !== undefined && turnSequenceId !== this.activeTurnSequenceId) {
+      // Discard stale turn chunks immediately
+      return;
+    }
+    this.queue.push({ chunk, turnSequenceId, onFirstChunkSent });
+  }
+
+  public clear(newSequenceId?: number): void {
     this.queue = [];
     this.isPlaying = false;
     this.isInterrupted = true;
+    if (newSequenceId !== undefined) {
+      this.activeTurnSequenceId = newSequenceId;
+    }
+    // Cancel in-flight pacing timer immediately for 0ms barge-in response
+    if (this.currentSleepResolve) {
+      const resolve = this.currentSleepResolve;
+      this.currentSleepResolve = null;
+      resolve();
+    }
   }
 
   public resetInterruption(): void {
     this.isInterrupted = false;
+  }
+
+  public get isCurrentlyInterrupted(): boolean {
+    return this.isInterrupted;
   }
 
   public hasPending(): boolean {
@@ -256,12 +297,13 @@ export class AudioPlaybackQueue {
       this.isPlaying = false;
       return null;
     }
-    const chunk = this.queue.shift() || null;
-    if (chunk) {
-      this.totalBytesSent += chunk.length;
+    const item = this.queue.shift() || null;
+    if (item) {
+      this.totalBytesSent += item.chunk.length;
       this.isPlaying = true;
+      return item.chunk;
     }
-    return chunk;
+    return null;
   }
 
   public getPendingCount(): number {
@@ -270,6 +312,72 @@ export class AudioPlaybackQueue {
 
   public getTotalBytesSent(): number {
     return this.totalBytesSent;
+  }
+
+  /**
+   * Authoritative serialized playback consumer.
+   * Ensures only ONE consumer loop sends chunks to Exotel, eliminating audio interleaving.
+   */
+  public async playSequential(
+    sendFn: (chunk: Buffer) => boolean,
+    pacingMs = 180
+  ): Promise<void> {
+    if (this.isProcessingQueue) {
+      return this.activeDrainPromise || Promise.resolve();
+    }
+
+    this.isProcessingQueue = true;
+    this.isInterrupted = false;
+    this.isPlaying = true;
+
+    this.activeDrainPromise = (async () => {
+      try {
+        let isFirstSentForTurn = false;
+
+        while (this.queue.length > 0 && !this.isInterrupted) {
+          const item = this.queue.shift();
+          if (!item) break;
+
+          // Reject chunk if superseded by a newer turn
+          if (
+            item.turnSequenceId !== undefined &&
+            item.turnSequenceId !== this.activeTurnSequenceId
+          ) {
+            continue;
+          }
+
+          const sent = sendFn(item.chunk);
+          if (sent) {
+            this.totalBytesSent += item.chunk.length;
+            if (!isFirstSentForTurn && item.onFirstChunkSent) {
+              item.onFirstChunkSent();
+              isFirstSentForTurn = true;
+            }
+          }
+
+          // Progressive pacing for 200ms audio chunks (180ms delay)
+          if (this.queue.length > 0 && !this.isInterrupted) {
+            await new Promise<void>((resolve) => {
+              this.currentSleepResolve = resolve;
+              setTimeout(() => {
+                if (this.currentSleepResolve === resolve) {
+                  this.currentSleepResolve = null;
+                }
+                resolve();
+              }, pacingMs);
+            });
+          }
+        }
+      } finally {
+        this.isProcessingQueue = false;
+        this.activeDrainPromise = null;
+        if (this.queue.length === 0) {
+          this.isPlaying = false;
+        }
+      }
+    })();
+
+    return this.activeDrainPromise;
   }
 }
 

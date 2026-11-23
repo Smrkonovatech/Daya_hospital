@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# test validation artifacts
+scripts/validation/audio_output/
+scripts/validation/e2e_audio/
+scripts/validation/*_results.json
+

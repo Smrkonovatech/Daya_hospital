@@ -57,6 +57,7 @@ export interface TextToSpeechProvider {
       voiceId?: string;
       pitch?: number;
       pace?: number;
+      signal?: AbortSignal;
     }
   ): Promise<Buffer>;
 }
