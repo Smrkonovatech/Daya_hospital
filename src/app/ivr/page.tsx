@@ -631,7 +631,7 @@ export default function IvrFlowsPage() {
                     onClick={() => setSelectedMappingFlow(flow)}
                     className="text-xs text-slate-600 border-slate-200 hover:bg-white"
                   >
-                    Exotel Guide
+                    View Exotel Setup Instructions
                   </Button>
 
                   <Link href={`/ivr/${flow.id}`} className="w-full sm:w-auto">
@@ -901,15 +901,18 @@ export default function IvrFlowsPage() {
         <Modal
           isOpen={!!selectedMappingFlow}
           onClose={() => setSelectedMappingFlow(null)}
-          title={`Exotel Telephony Mapping: ${selectedMappingFlow?.name}`}
+          title={`Exotel Telephony Setup: ${selectedMappingFlow?.name}`}
         >
           {selectedMappingFlow && (
             <div className="space-y-4 text-xs">
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900 space-y-1">
-                <p className="font-semibold text-slate-900">Provider Limitation Notice (Exotel Singapore):</p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 space-y-1">
+                <p className="font-semibold text-slate-900">Provider Architectural Boundary Notice (Exotel Singapore):</p>
                 <p>
                   Exotel does not expose a public REST API for automated visual applet graph generation.
-                  To activate this flow on your live phone number, map the applet parameters in your Exotel dashboard.
+                  Publishing a call flow in Smrkomed immediately activates it for new inbound sessions via our live Gateway runtime, but does <strong>not</strong> reconfigure your Exotel applet.
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  Active in-flight calls continue executing the exact published version snapshot they started with.
                 </p>
               </div>
 

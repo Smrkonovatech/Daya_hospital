@@ -659,7 +659,7 @@ function IvrFlowBuilderContent() {
               Test Flow
             </Button>
 
-            {/* Exotel Mapping Guide Button */}
+            {/* Exotel Setup Instructions Button */}
             <Button
               size="sm"
               variant="outline"
@@ -667,7 +667,7 @@ function IvrFlowBuilderContent() {
               className="h-8 text-xs font-medium border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1.5"
             >
               <Radio className="w-3.5 h-3.5 text-emerald-600" />
-              Exotel Mapping
+              View Exotel Setup Instructions
             </Button>
 
             {/* Save Draft Button */}
@@ -1347,12 +1347,18 @@ function IvrFlowBuilderContent() {
         <Modal
           isOpen={isExotelModalOpen}
           onClose={() => setIsExotelModalOpen(false)}
-          title="Exotel Telephony Integration & Applet Mapping"
+          title="Exotel Telephony Integration & Setup Instructions"
         >
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1 text-slate-700">
-              <p className="font-semibold text-slate-900">Exotel Account: smrkonova1 (Singapore)</p>
-              <p>WebSocket Streaming Endpoint: <span className="font-mono text-[11px] text-emerald-700 font-bold">wss://dayahospital-production-467a7d31.up.railway.app/exotel/voicebot</span></p>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 space-y-1">
+              <p className="font-semibold text-slate-900">Provider Limitation & Runtime Boundary:</p>
+              <p>
+                Exotel Singapore (smrkonova1) does not support dynamic visual applet modifications via API.
+                Publishing this flow updates the Smrkomed runtime dynamically for all incoming calls routed through Applet <strong>{exotelAppletIdInput}</strong>.
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Existing active calls remain locked to their starting version snapshot until disconnected.
+              </p>
             </div>
 
             <div>

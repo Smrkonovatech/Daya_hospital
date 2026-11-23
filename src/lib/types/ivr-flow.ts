@@ -200,6 +200,8 @@ export interface EmergencyHandlingNodeData {
   fallbackInstructionsMalayalam: string;
   fallbackInstructionsEnglish: string;
   bypassBusinessHours: boolean;
+  autoTransfer?: boolean;
+  isConfirmedDestination?: boolean;
 }
 
 export interface DaySchedule {
@@ -450,7 +452,7 @@ export interface FlowExecutionContext {
   hospitalId: string;
   flowId: string;
   flowVersion: number;
-  currentLanguage: "ml-IN" | "en-IN" | "hi-IN";
+  currentLanguage: "ml-IN" | "en-IN" | "hi-IN" | "ta-IN" | "kn-IN" | "te-IN" | string;
   currentNodeId: string;
   variables: Record<string, unknown>;
   history: Array<{
@@ -482,7 +484,7 @@ export interface FlowExecutionStepResult {
     | "INVOKE_SUBFLOW"
     | "RETURN_FROM_SUBFLOW";
   audioText?: string;
-  audioLanguage?: "ml-IN" | "en-IN" | "hi-IN";
+  audioLanguage?: "ml-IN" | "en-IN" | "hi-IN" | "ta-IN" | "kn-IN" | "te-IN" | string;
   ttsSpeaker?: string;
   speakingPace?: number;
   dtmfPrompt?: string;

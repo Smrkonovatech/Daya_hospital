@@ -31,6 +31,7 @@ import { ivrFlowService, IvrFlowService } from "@/lib/services/ivr-flow-service"
 import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/lib/types/ivr-flow";
 import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
 import { EmergencyDetector } from "@/lib/services/emergency-detector";
+import { LanguageDetector } from "@/lib/services/language-detector";
 
 export interface SocketSender {
   send(data: string, cb?: (err?: Error) => void): void;
@@ -118,6 +119,8 @@ export class CallMediaSession extends EventEmitter {
   public lastStepResult?: FlowExecutionStepResult;
   public enableIvrFlow = true;
   public initPromise?: Promise<void>;
+  public emergencyTriggered = false;
+  public greetingPlayed = false;
 
   private dtmfTimeoutTimer?: NodeJS.Timeout;
   private isExecutingStep = false;
@@ -209,15 +212,29 @@ export class CallMediaSession extends EventEmitter {
       this.emit("transcript", turn);
 
       // Continuous background emergency monitoring on every incoming transcript chunk (interim or final)
-      if (turn.text && turn.text.trim()) {
+      if (turn.text && turn.text.trim() && !this.emergencyTriggered) {
         const chunkText = turn.text.trim();
         const emMatch = EmergencyDetector.evaluate(chunkText, 0.70);
         if (emMatch.isEmergency && emMatch.requiresImmediateInterruption) {
+          this.emergencyTriggered = true;
           console.warn(`[CallSession ${this.callSid}] [CONTINUOUS EMERGENCY] Detected '${emMatch.matchedPhrase}' (confidence: ${emMatch.confidenceScore.toFixed(2)}). Immediate interruption triggered.`);
           this.interruptPlayback();
           if (this.ivrContext) {
             this.ivrContext.isEmergency = true;
             this.ivrContext.executionPriority = "EMERGENCY";
+          }
+          ivrFlowService.logEmergencyEvent({
+            hospitalId: this.hospitalId,
+            callSid: this.callSid,
+            flowId: this.ivrFlow?.id || "flow_main",
+            flowVersion: this.ivrVersion || 1,
+            triggerPhrase: chunkText,
+            targetDestination: (this.ivrContext?.variables?.casualtyHotline as string) || "EMERGENCY_TRIAGE",
+            callerNumber: this.fromNumber,
+          }).catch((err) => console.warn(`[CallSession ${this.callSid}] Failed to log emergency event:`, err));
+
+          if (this.isExecutingIvrFlow) {
+            this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: chunkText }).catch(() => {});
           }
         }
       }
@@ -231,7 +248,8 @@ export class CallMediaSession extends EventEmitter {
         });
 
         // 1. Emergency intent check across speech turns (Malayalam, English, and mixed)
-        if (IvrFlowExecutionEngine.detectEmergencyIntent(text)) {
+        if (!this.emergencyTriggered && IvrFlowExecutionEngine.detectEmergencyIntent(text)) {
+          this.emergencyTriggered = true;
           console.log(`[CallSession ${this.callSid}] Emergency keyword detected in caller utterance: "${text}"`);
           this.interruptPlayback();
 
@@ -241,7 +259,7 @@ export class CallMediaSession extends EventEmitter {
             flowId: this.ivrFlow?.id || "flow_main",
             flowVersion: this.ivrVersion || 1,
             triggerPhrase: text,
-            targetDestination: (this.ivrContext?.variables?.casualtyHotline as string) || "0487 2475100",
+            targetDestination: (this.ivrContext?.variables?.casualtyHotline as string) || "EMERGENCY_TRIAGE",
             callerNumber: this.fromNumber,
           }).catch((err) => console.warn(`[CallSession ${this.callSid}] Failed to log emergency event:`, err));
 
@@ -249,6 +267,12 @@ export class CallMediaSession extends EventEmitter {
             await this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: text });
             return;
           }
+        }
+
+        // Automatic Language Detection: adapt to caller speech in real time
+        const detected = LanguageDetector.detectLanguage(text, this.ivrContext?.currentLanguage || "en-IN");
+        if (detected.isSupported && this.ivrContext) {
+          this.ivrContext.currentLanguage = detected.languageCode;
         }
 
         // 2. If waiting for DTMF, check for spoken digits as accessibility fallback
@@ -421,6 +445,7 @@ export class CallMediaSession extends EventEmitter {
       case "PLAY_AUDIO": {
         this.waitingForDtmf = false;
         if (stepResult.audioText) {
+          this.greetingPlayed = true;
           this.conversationTurns.push({
             speaker: "ai",
             text: stepResult.audioText,
@@ -519,7 +544,7 @@ export class CallMediaSession extends EventEmitter {
         const destination =
           stepResult.transferDestination ||
           this.hospitalConfig.telephony.incomingHospitalNumber ||
-          "+91 96066 54032";
+          "";
 
         if (stepResult.audioText) {
           this.conversationTurns.push({
@@ -579,13 +604,22 @@ export class CallMediaSession extends EventEmitter {
 
         this.interruptPlayback();
 
+        const emConfig = await this.ivrService.getEmergencyRoutingConfig(this.hospitalId);
         const casualtyDestination =
-          this.hospitalConfig.routing.casualtyDirectNumber ||
+          (emConfig?.isVerified && emConfig?.casualtyNumber) ||
           stepResult.transferDestination ||
-          "0487 2475100";
+          this.hospitalConfig.routing.casualtyDirectNumber ||
+          "";
+
+        const isTransferAllowed = Boolean(
+          emConfig?.allowLiveTransfer &&
+          emConfig?.isVerified &&
+          casualtyDestination &&
+          process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true"
+        );
 
         console.log(
-          `[CallSession ${this.callSid}] [EMERGENCY PROTOCOL] Fast-tracking call to Casualty (${casualtyDestination})`
+          `[CallSession ${this.callSid}] [EMERGENCY PROTOCOL] Fast-tracking call to Casualty (destination: ${casualtyDestination || "NONE"}, allowLiveTransfer: ${isTransferAllowed})`
         );
 
         if (stepResult.audioText) {
@@ -595,15 +629,56 @@ export class CallMediaSession extends EventEmitter {
             timestampMs: Date.now(),
           });
           const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          const cap = LanguageDetector.getCapability(lang);
           try {
             const pcm = await this.ttsProvider.synthesize(stepResult.audioText, {
-              language: lang,
-              voiceId: lang === "en-IN" ? "ratan" : "kavitha",
+              language: cap.code,
+              voiceId: cap.ttsVoice,
             });
             if (pcm && pcm.length > 0 && !this.isStopped) {
               await this.streamPcmAudio(pcm);
             }
           } catch {}
+        }
+
+        if (!isTransferAllowed) {
+          console.warn(
+            `[CallSession ${this.callSid}] Emergency auto-transfer is DISABLED for hospital '${this.hospitalId}' (unconfirmed destination). Entering safe guidance fallback.`
+          );
+          const lang = this.ivrContext?.currentLanguage || "ml-IN";
+          const fallbackMsg =
+            lang === "en-IN"
+              ? "This has been identified as an urgent medical emergency. Since automated telephone transfer is currently disabled pending hospital destination confirmation, please proceed immediately to the nearest hospital casualty or dial emergency services at 108 or 112."
+              : "ഇതൊരു അടിയന്തിര സാഹചര്യമാണെന്ന് മനസ്സിലാക്കുന്നു. അടിയന്തിര ഫോൺ ട്രാൻസ്ഫർ നിലവിൽ ലഭ്യമാക്കിയിട്ടില്ലാത്തതിനാൽ ദയവായി തൊട്ടടുത്ത ആശുപത്രി കാഷ്വാലിറ്റിയിൽ നേരിട്ടെത്തുകയോ 108 അല്ലെങ്കിൽ 112 ലേക്ക് ഉടൻ വിളിക്കുകയോ ചെയ്യുക.";
+          const cap = LanguageDetector.getCapability(lang);
+          try {
+            const pcm = await this.ttsProvider.synthesize(fallbackMsg, {
+              language: cap.code,
+              voiceId: cap.ttsVoice,
+            });
+            if (pcm && pcm.length > 0 && !this.isStopped) {
+              await this.streamPcmAudio(pcm);
+            }
+          } catch {}
+
+          this.transferAttempt = {
+            destinationRedacted: casualtyDestination ? this.maskPhoneNumber(casualtyDestination) : "[UNCONFIRMED_DESTINATION]",
+            timestamp: Date.now(),
+            success: false,
+            error: "Emergency auto-transfer disabled pending authorized destination confirmation",
+          };
+
+          await this.ivrService.logEmergencyEvent({
+            hospitalId: this.hospitalId,
+            callSid: this.callSid,
+            flowId: this.ivrFlow?.id || "flow_main",
+            flowVersion: this.ivrVersion || 1,
+            triggerPhrase: stepResult.audioText || "Emergency protocol triggered",
+            targetDestination: "SAFE_FALLBACK_UNCONFIRMED",
+            callerNumber: this.fromNumber,
+          }).catch(() => {});
+
+          break;
         }
 
         try {
@@ -619,21 +694,15 @@ export class CallMediaSession extends EventEmitter {
             error: res.error,
           };
           if (!res.success) {
-            const isConfirmed = Boolean(
-              this.hospitalConfig.telephony.status === "CONFIRMED" &&
-              process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true"
-            );
+            const lang = this.ivrContext?.currentLanguage || "ml-IN";
             const fallbackMsg =
-              this.ivrContext?.currentLanguage === "en-IN"
-                ? (isConfirmed
-                    ? `Emergency transfer failed. Please call our 24/7 Casualty desk directly at ${casualtyDestination}.`
-                    : `Emergency transfer is currently unavailable. Please proceed directly to the nearest hospital emergency department or dial emergency services immediately.`)
-                : (isConfirmed
-                    ? `കാഷ്വാലിറ്റിയിലേക്ക് ബന്ധിപ്പിക്കാൻ സാധിച്ചില്ല. ദയവായി ഈ നമ്പറിലേക്ക് നേരിട്ട് വിളിക്കുക: ${casualtyDestination}.`
-                    : `അടിയന്തിര ട്രാൻസ്ഫർ നിലവിൽ ലഭ്യമല്ല. ദയവായി തൊട്ടടുത്ത ആശുപത്രി അത്യാഹിത വിഭാഗത്തിൽ നേരിട്ടെത്തുക.`);
+              lang === "en-IN"
+                ? `Emergency transfer failed. Please call our 24/7 Casualty desk directly at ${casualtyDestination}.`
+                : `കാഷ്വാലിറ്റിയിലേക്ക് ബന്ധിപ്പിക്കാൻ സാധിച്ചില്ല. ദയവായി ഈ നമ്പറിലേക്ക് നേരിട്ട് വിളിക്കുക: ${casualtyDestination}.`;
+            const cap = LanguageDetector.getCapability(lang);
             const pcm = await this.ttsProvider.synthesize(fallbackMsg, {
-              language: this.ivrContext?.currentLanguage || "ml-IN",
-              voiceId: this.ivrContext?.currentLanguage === "en-IN" ? "ratan" : "kavitha",
+              language: cap.code,
+              voiceId: cap.ttsVoice,
             });
             if (pcm && pcm.length > 0 && !this.isStopped) {
               await this.streamPcmAudio(pcm);
@@ -697,12 +766,14 @@ export class CallMediaSession extends EventEmitter {
   }
 
   /**
-   * Plays the initial Daya Hospital Malayalam welcome greeting to the caller.
+   * Plays the initial hospital welcome greeting to the caller.
    */
   public async playInitialGreeting(): Promise<void> {
-    if (this.isStopped) return;
+    if (this.isStopped || this.greetingPlayed) return;
+    this.greetingPlayed = true;
 
-    const greeting = this.conversationEngine.getInitialGreeting();
+    const initialLang = this.ivrContext?.currentLanguage || "en-IN";
+    const greeting = this.conversationEngine.getInitialGreeting(initialLang);
     this.lastAiResponse = greeting;
     this.ttsStatus = "SYNTHESIZING";
 
@@ -713,9 +784,10 @@ export class CallMediaSession extends EventEmitter {
     });
 
     try {
+      const cap = LanguageDetector.getCapability(initialLang);
       const pcm = await this.ttsProvider.synthesize(greeting, {
-        language: "ml-IN",
-        voiceId: "kavitha",
+        language: cap.code,
+        voiceId: cap.ttsVoice,
       });
 
       if (pcm && pcm.length > 0 && !this.isStopped) {
@@ -787,9 +859,11 @@ export class CallMediaSession extends EventEmitter {
     let lastAudioSentToExotelMs = 0;
 
     try {
+      const lang = this.ivrContext?.currentLanguage || "en-IN";
+      const cap = LanguageDetector.getCapability(lang);
       const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
-        language: "ml-IN",
-        voiceId: "kavitha",
+        language: cap.code,
+        voiceId: cap.ttsVoice,
       });
 
       ttsFirstAudioMs = Date.now();

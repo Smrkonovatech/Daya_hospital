@@ -416,7 +416,7 @@ export function createDefaultNode(
   const meta = NODE_TYPE_REGISTRY[type];
   const id = `node_${type.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const hospName = hospitalDefaults?.hospitalName || "our hospital";
-  const emergencyNum = hospitalDefaults?.emergencyNumber || "0487 2475100";
+  const emergencyNum = hospitalDefaults?.emergencyNumber || "";
 
   let data: FlowNodeData = {};
 
@@ -495,8 +495,7 @@ export function createDefaultNode(
 
     case "HUMAN_TRANSFER":
       data = {
-        transferType: "PHONE_NUMBER",
-        destinationNumber: emergencyNum,
+        transferType: "DEPARTMENT",
         departmentId: "dept_reception",
         whisperMessage: "Incoming hospital call transferred from Smrkomed IVR.",
         timeoutSeconds: 25,
@@ -509,9 +508,11 @@ export function createDefaultNode(
         priorityEscalation: true,
         announcementMalayalam: "ഇതൊരു അത്യാഹിത കോളായതിനാൽ ഉടൻ കാഷ്വാലിറ്റിയിലേക്ക് കണക്ട് ചെയ്യുന്നു. ദയവായി കാത്തിരിക്കുക.",
         announcementEnglish: "Connecting you immediately to the Casualty department. Please stay on the line.",
-        casualtyDestinationNumber: emergencyNum,
-        fallbackInstructionsMalayalam: `ലൈൻ ബിസിയാണെങ്കിൽ ദയവായി നേരിട്ട് ${emergencyNum} എന്ന നമ്പറിൽ വിളിക്കുക അല്ലെങ്കിൽ തൊട്ടടുത്ത ആശുപത്രിയിലെത്തുക.`,
-        fallbackInstructionsEnglish: `If line is busy, please dial ${emergencyNum} directly or proceed to the nearest emergency center immediately.`,
+        casualtyDestinationNumber: emergencyNum || "",
+        autoTransfer: Boolean(emergencyNum),
+        isConfirmedDestination: Boolean(emergencyNum),
+        fallbackInstructionsMalayalam: "അടിയന്തിര ട്രാൻസ്ഫർ ലഭ്യമല്ലെങ്കിൽ ദയവായി തൊട്ടടുത്ത ആശുപത്രിയിലെത്തുകയോ 108 ലേക്ക് വിളിക്കുകയോ ചെയ്യുക.",
+        fallbackInstructionsEnglish: "If transfer is unavailable, please proceed directly to the nearest emergency department or call emergency services (108 / 112).",
         bypassBusinessHours: true,
       } as EmergencyHandlingNodeData;
       break;
@@ -713,9 +714,9 @@ export function createDefaultNode(
  */
 export function createDefaultHospitalFlow(
   hospitalId: string,
-  hospitalName = "Daya Hospital Thrissur",
-  emergencyNumber = "0487 2475100",
-  defaultAgentId = "agent_daya_receptionist_v1"
+  hospitalName = "General Hospital",
+  emergencyNumber = "",
+  defaultAgentId = "agent_hospital_receptionist_v1"
 ): IvrFlowData {
   const defaults = {
     hospitalName,

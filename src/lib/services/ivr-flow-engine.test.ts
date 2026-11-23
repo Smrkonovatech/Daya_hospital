@@ -5,7 +5,7 @@ import { BusinessHoursNodeData } from "@/lib/types/ivr-flow";
 
 describe("IvrFlowExecutionEngine (Phase 4)", () => {
   const hospitalId = "hosp_daya_thrissur";
-  const flow = createDefaultHospitalFlow(hospitalId, "Daya Hospital Thrissur");
+  const flow = createDefaultHospitalFlow(hospitalId, "Daya Hospital Thrissur", "0487 2475100");
 
   it("initializes a call execution context locked to the flow's version", () => {
     const callSid = "CA_test_ivr_101";

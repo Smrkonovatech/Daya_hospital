@@ -92,7 +92,7 @@ export class IvrFlowService {
     const defaultFlow = createDefaultHospitalFlow(
       hospitalId,
       hospitalId === "hosp_daya_thrissur" ? "Daya Hospital Thrissur" : `Hospital ${hospitalId}`,
-      hospitalId === "hosp_daya_thrissur" ? "0487 2475100" : "1800 123 4567"
+      ""
     );
 
     inMemoryFlows.set(defaultFlow.id, defaultFlow);
@@ -552,6 +552,26 @@ export class IvrFlowService {
       };
     }
 
+    // Safety rule: Cannot publish enabled emergency transfer without confirmed destination
+    const hasActiveEmergencyTransfer = flow.nodes.some((n) => {
+      if (n.type === "EMERGENCY_HANDLING") {
+        const d = n.data as Record<string, unknown>;
+        return Boolean(d.autoTransfer || d.autoTransferEnabled);
+      }
+      return false;
+    });
+
+    if (hasActiveEmergencyTransfer) {
+      const emConfig = await this.getEmergencyRoutingConfig(hospitalId);
+      if (!emConfig || !emConfig.isVerified || !emConfig.allowLiveTransfer || !emConfig.casualtyNumber) {
+        return {
+          success: false,
+          versionNumber: flow.currentVersion,
+          error: "Cannot publish flow with enabled emergency transfer: Hospital emergency destination is unconfirmed. Emergency auto-transfer must remain DISABLED until an authorized representative confirms the destination.",
+        };
+      }
+    }
+
     const nextVersion = flow.currentVersion + 1;
     const deploymentStatus = flow.exotelMapping?.verifiedAt ? "EXOTEL_MAPPING_VERIFIED" : "PUBLISHED_INTERNALLY";
 
@@ -796,16 +816,16 @@ export class IvrFlowService {
       }
     }
 
-    // Default configuration
+    // Default configuration: auto-transfer strictly DISABLED until authorized confirmation
     return {
       id: `em_config_${hospitalId}`,
       hospitalId,
-      casualtyNumber: "0487 2475100",
-      isVerified: true,
-      verifiedBy: "Hospital Medical Superintendent",
-      verifiedAt: new Date(),
+      casualtyNumber: "",
+      isVerified: false,
+      verifiedBy: null,
+      verifiedAt: null,
       fallbackNumber: "108",
-      allowLiveTransfer: false, // development safe default
+      allowLiveTransfer: false, // development safe default: DISABLED
       interruptionKeywordsMalayalam: ["നെഞ്ചുവേദന", "ശ്വാസംമുട്ടൽ", "അത്യാഹിതം", "രക്തം", "ആംബുലൻസ്", "കാഷ്വാലിറ്റി"],
       interruptionKeywordsEnglish: ["chest pain", "emergency", "casualty", "heart attack", "bleeding", "ambulance", "breathing"],
       interruptionKeywordsManglish: ["nenju vedana", "swasam muttal", "accident", "blood"],
@@ -823,6 +843,15 @@ export class IvrFlowService {
     config: Partial<EmergencyRoutingConfig>,
     userName = "Hospital Administrator"
   ): Promise<EmergencyRoutingConfig> {
+    if (config.allowLiveTransfer) {
+      if (!config.casualtyNumber || !config.casualtyNumber.trim()) {
+        throw new Error("Emergency auto-transfer cannot be enabled without a valid destination number.");
+      }
+      if (!config.isVerified) {
+        throw new Error("Emergency auto-transfer requires verified destination authorization from an authorized hospital representative.");
+      }
+    }
+
     const dbStatus = await checkDatabaseConnection();
     if (dbStatus.connected) {
       try {
@@ -830,7 +859,7 @@ export class IvrFlowService {
           where: { hospitalId },
           create: {
             hospitalId,
-            casualtyNumber: config.casualtyNumber || "0487 2475100",
+            casualtyNumber: config.casualtyNumber || "",
             isVerified: config.isVerified ?? false,
             verifiedBy: config.verifiedBy || userName,
             verifiedAt: config.isVerified ? new Date() : undefined,
@@ -863,7 +892,7 @@ export class IvrFlowService {
     return {
       id: `em_config_${hospitalId}`,
       hospitalId,
-      casualtyNumber: config.casualtyNumber || "0487 2475100",
+      casualtyNumber: config.casualtyNumber || "",
       isVerified: config.isVerified ?? false,
       verifiedBy: config.verifiedBy || userName,
       verifiedAt: config.isVerified ? new Date() : null,

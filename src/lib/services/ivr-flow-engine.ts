@@ -116,6 +116,23 @@ export class IvrFlowExecutionEngine {
     input: StepInputEvent,
     now: Date = new Date()
   ): FlowExecutionStepResult {
+    // Multi-tenant Security Guard: Tenant ID in context must match flow tenant ID (templates are tenant-agnostic)
+    if (
+      flow.hospitalId &&
+      context.hospitalId &&
+      flow.hospitalId !== "template" &&
+      !flow.isTemplate &&
+      flow.hospitalId !== context.hospitalId
+    ) {
+      return {
+        nextNodeId: null,
+        action: "HANGUP",
+        logMessage: `Security violation: Cross-tenant access violation. Flow tenant '${flow.hospitalId}' does not match call context tenant '${context.hospitalId}'.`,
+        isTerminal: true,
+        context,
+      };
+    }
+
     const currentNode = flow.nodes.find((n) => n.id === context.currentNodeId);
     if (!currentNode) {
       return {
@@ -175,7 +192,7 @@ export class IvrFlowExecutionEngine {
           transferDestination:
             emData.casualtyDestinationNumber ||
             (context.variables.casualtyHotline as string) ||
-            "0487 2475100",
+            undefined,
           logMessage: `[EMERGENCY OVERRIDE] Casualty fast-track activated. Transferring to Casualty.`,
           isTerminal: false,
           context,
@@ -762,7 +779,7 @@ export class IvrFlowExecutionEngine {
           const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "casualty_transfer");
           nextNodeId = edge ? edge.targetNodeId : null;
           actionResult = "EMERGENCY_ESCALATE";
-          transferDestination = ahData.casualtyNumber || "0487 2475100";
+          transferDestination = ahData.casualtyNumber || (context.variables.casualtyHotline as string) || undefined;
           logMessage = `Emergency detected during after-hours. Connecting to casualty.`;
         } else if (text.includes("book") || text.includes("morning") || text.includes("appointment")) {
           const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "morning_booking");

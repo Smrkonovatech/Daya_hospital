@@ -98,3 +98,4 @@ CREATE TABLE IF NOT EXISTS "FlowAuditEvent" (
 -- CreateIndex for FlowAuditEvent
 CREATE INDEX IF NOT EXISTS "FlowAuditEvent_hospitalId_flowId_idx" ON "FlowAuditEvent"("hospitalId", "flowId");
 CREATE INDEX IF NOT EXISTS "FlowAuditEvent_hospitalId_createdAt_idx" ON "FlowAuditEvent"("hospitalId", "createdAt");
+

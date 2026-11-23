@@ -291,13 +291,23 @@ export class IvrFlowValidator {
 
       case "EMERGENCY_HANDLING": {
         const emData = data as unknown as EmergencyHandlingNodeData;
-        if (!emData.casualtyDestinationNumber || !emData.casualtyDestinationNumber.trim()) {
-          errors.push({
-            nodeId: node.id,
-            level: "ERROR",
-            message: `Emergency Handling node '${node.title}' requires a valid casualty destination phone number.`,
-            code: "MISSING_EMERGENCY_DESTINATION",
-          });
+        const autoTransferEnabled = Boolean(emData.autoTransfer);
+        if (autoTransferEnabled) {
+          if (!emData.casualtyDestinationNumber || !emData.casualtyDestinationNumber.trim()) {
+            errors.push({
+              nodeId: node.id,
+              level: "ERROR",
+              message: `Emergency Handling node '${node.title}' has auto-transfer enabled but has no destination phone number.`,
+              code: "MISSING_EMERGENCY_DESTINATION",
+            });
+          } else if (!emData.isConfirmedDestination) {
+            errors.push({
+              nodeId: node.id,
+              level: "ERROR",
+              message: `Emergency Handling node '${node.title}' cannot enable auto-transfer to unconfirmed destination '${emData.casualtyDestinationNumber}'. Destination must be validated by an authorized hospital representative.`,
+              code: "UNCONFIRMED_EMERGENCY_DESTINATION",
+            });
+          }
         }
         break;
       }

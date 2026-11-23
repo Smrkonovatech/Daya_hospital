@@ -37,7 +37,7 @@ export interface IvrFlowTemplateSummary {
   isDefaultCandidate?: boolean;
 }
 
-export function buildTemplateMainAiReception(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateMainAiReception(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -122,7 +122,7 @@ export function buildTemplateMainAiReception(hospitalName = "Daya Hospital Thris
   };
 }
 
-export function buildTemplateEmergencyEscalation(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateEmergencyEscalation(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 80, y: 200 }, defaults);
@@ -130,6 +130,13 @@ export function buildTemplateEmergencyEscalation(hospitalName = "Daya Hospital T
 
   const monitorNode = createDefaultNode("EMERGENCY_MONITOR", { x: 340, y: 200 }, defaults);
   const emergencyHandlingNode = createDefaultNode("EMERGENCY_HANDLING", { x: 680, y: 200 }, defaults);
+  const emData = emergencyHandlingNode.data as Record<string, unknown>;
+  emData.casualtyDestinationNumber = emergencyNumber || "";
+  emData.autoTransfer = false;
+  emData.isConfirmedDestination = false;
+  emData.fallbackInstructionsMalayalam = "അടിയന്തിര ട്രാൻസ്ഫർ നിലവിൽ സജ്ജീകരിച്ചിട്ടില്ലാത്തതിനാൽ ദയവായി തൊട്ടടുത്ത ആശുപത്രി അത്യാഹിത വിഭാഗത്തിൽ നേരിട്ടെത്തുകയോ 108 അല്ലെങ്കിൽ 112 ലേക്ക് വിളിക്കുകയോ ചെയ്യുക.";
+  emData.fallbackInstructionsEnglish = "Emergency telephone transfer is currently disabled pending destination confirmation. Please proceed immediately to the nearest hospital casualty or call emergency services (108 / 112).";
+
   const returnNode = createDefaultNode("RETURN_SUBFLOW", { x: 1020, y: 140 }, defaults);
   returnNode.title = "Return to Calling Flow";
   const endCallNode = createDefaultNode("END_CALL", { x: 1020, y: 280 }, defaults);
@@ -177,7 +184,7 @@ export function buildTemplateEmergencyEscalation(hospitalName = "Daya Hospital T
   };
 }
 
-export function buildTemplateDepartmentRouting(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateDepartmentRouting(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 240 }, defaults);
@@ -236,7 +243,7 @@ export function buildTemplateDepartmentRouting(hospitalName = "Daya Hospital Thr
   };
 }
 
-export function buildTemplateAfterHours(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateAfterHours(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -289,7 +296,7 @@ export function buildTemplateAfterHours(hospitalName = "Daya Hospital Thrissur",
   };
 }
 
-export function buildTemplateAppointmentEnquiries(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateAppointmentEnquiries(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -329,7 +336,7 @@ export function buildTemplateAppointmentEnquiries(hospitalName = "Daya Hospital 
   };
 }
 
-export function buildTemplateAppointmentBooking(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateAppointmentBooking(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -373,7 +380,7 @@ export function buildTemplateAppointmentBooking(hospitalName = "Daya Hospital Th
   };
 }
 
-export function buildTemplateBillingInsurance(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateBillingInsurance(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -418,7 +425,7 @@ export function buildTemplateBillingInsurance(hospitalName = "Daya Hospital Thri
   };
 }
 
-export function buildTemplateHumanHandoff(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateHumanHandoff(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -458,7 +465,7 @@ export function buildTemplateHumanHandoff(hospitalName = "Daya Hospital Thrissur
   };
 }
 
-export function buildTemplateLabEnquiries(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateLabEnquiries(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -499,7 +506,7 @@ export function buildTemplateLabEnquiries(hospitalName = "Daya Hospital Thrissur
   };
 }
 
-export function buildTemplateDoctorInfo(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateDoctorInfo(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 60, y: 220 }, defaults);
@@ -537,7 +544,7 @@ export function buildTemplateDoctorInfo(hospitalName = "Daya Hospital Thrissur",
   };
 }
 
-export function buildTemplateCustom(hospitalName = "Daya Hospital Thrissur", emergencyNumber = "0487 2475100"): IvrFlowData {
+export function buildTemplateCustom(hospitalName = "General Hospital", emergencyNumber = ""): IvrFlowData {
   const defaults = { hospitalName, emergencyNumber };
 
   const incomingNode = createDefaultNode("INCOMING_CALL", { x: 80, y: 220 }, defaults);
@@ -616,7 +623,7 @@ export function getFlowTemplateById(templateId: string, hospitalName?: string, e
 export function cloneFlowFromTemplate(
   templateId: string,
   hospitalId: string,
-  hospitalName = "Daya Hospital Thrissur",
+  hospitalName = "General Hospital",
   overrides?: Partial<IvrFlowData>
 ): IvrFlowData {
   const template = getFlowTemplateById(templateId, hospitalName);
@@ -678,3 +685,4 @@ export function cloneFlowFromTemplate(
     ...overrides,
   };
 }
+

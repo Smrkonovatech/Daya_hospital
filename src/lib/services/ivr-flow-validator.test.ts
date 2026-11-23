@@ -81,13 +81,14 @@ describe("IvrFlowValidator (Phase 4)", () => {
   });
 
   it("fails validation if Emergency Handling node has no casualty phone number", () => {
-    const defaultFlow = createDefaultHospitalFlow("hosp_daya_thrissur");
+    const defaultFlow = createDefaultHospitalFlow("hosp_daya_thrissur", "Daya Hospital", "0487 2475100");
     const nodes = defaultFlow.nodes.map((n) => {
       if (n.type === "EMERGENCY_HANDLING") {
         return {
           ...n,
           data: {
             ...n.data,
+            autoTransfer: true,
             casualtyDestinationNumber: "",
           },
         };
