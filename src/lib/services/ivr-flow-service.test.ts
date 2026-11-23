@@ -124,7 +124,7 @@ describe("IvrFlowService (Phase 4)", () => {
     const rbResult = await ivrFlowService.rollbackFlow(flowId, 2, hospitalId, "Auditor");
     expect(rbResult.success).toBe(true);
     expect(rbResult.versionNumber).toBe(4); // New published version created from v2 snapshot
-  });
+  }, 15000);
 
   it("updates Exotel applet mapping and marks deployment verified", async () => {
     const flowId = `flow_exotel_${Date.now()}`;

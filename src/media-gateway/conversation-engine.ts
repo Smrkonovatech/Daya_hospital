@@ -17,6 +17,7 @@
 
 import { HospitalConfig, DAYA_HOSPITAL_CONFIG } from "@/lib/config/hospital-config";
 import { getSarvamConfig, SarvamConfig } from "./sarvam-config";
+import { EmergencyDetector } from "@/lib/services/emergency-detector";
 
 export interface ConversationTurn {
   role: "user" | "assistant" | "system";
@@ -238,26 +239,7 @@ export class HospitalConversationEngine {
   // --------------------------------------------------------------------------
 
   private isEmergency(text: string): boolean {
-    const emergencyKeywords = [
-      "emergency",
-      "എമർജൻസി",
-      "accident",
-      "അടിയന്തിരം",
-      "അടിയന്തരം",
-      "ആക്സിഡന്റ്",
-      "അപകടം",
-      "നെഞ്ചുവേദന",
-      "ശ്വാസംമുട്ടൽ",
-      "അത്യാഹിതം",
-      "രക്തം",
-      "ആംബുലൻസ്",
-      "കാഷ്വാലിറ്റി",
-      "casualty",
-      "ambulance",
-      "icu",
-      "serious",
-    ];
-    return emergencyKeywords.some((kw) => text.includes(kw));
+    return EmergencyDetector.isEmergency(text);
   }
 
   private isStaffTransferRequested(text: string): boolean {

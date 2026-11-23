@@ -883,8 +883,14 @@ function IvrFlowBuilderContent() {
                       <p className="text-[11px] text-slate-500 line-clamp-2">
                         {node.type === "AI_VOICE_AGENT"
                           ? `Agent: ${(node.data as unknown as AiVoiceAgentNodeData).agentName || "Sarvam Assistant"}`
+                          : node.type === "DIRECT_AI_RECEPTIONIST"
+                          ? `Direct AI: ${(node.data as Record<string, unknown>).initialGreetingEnglish || "Voicebot"}`
+                          : node.type === "REUSABLE_SUBFLOW"
+                          ? `Subflow: ${(node.data as Record<string, unknown>).targetFlowCategory || (node.data as Record<string, unknown>).targetFlowId || "Modular Subflow"}`
                           : node.type === "EMERGENCY_HANDLING"
                           ? `Destination: ${(node.data as unknown as EmergencyHandlingNodeData).casualtyDestinationNumber || "Casualty"}`
+                          : node.type === "EMERGENCY_MONITOR"
+                          ? "Continuous Multilingual Monitor"
                           : node.description}
                       </p>
                     </div>

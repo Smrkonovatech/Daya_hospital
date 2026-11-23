@@ -91,7 +91,7 @@ describe("IVR Flows REST APIs (Phase 4)", () => {
     const listReq = new NextRequest(`http://localhost:3000/api/v1/ivr/flows?hospitalId=${hospitalId}`);
     const listRes = await getFlows(listReq);
     const listJson = await listRes.json();
-    const targetFlow = listJson.data[0];
+    const targetFlow = listJson.data.find((f: { nodes: unknown[] }) => f.nodes.length > 0) || listJson.data[0];
 
     const valReq = new NextRequest(`http://localhost:3000/api/v1/ivr/flows/${targetFlow.id}/validate`, {
       method: "POST",
@@ -108,7 +108,7 @@ describe("IVR Flows REST APIs (Phase 4)", () => {
     const listReq = new NextRequest(`http://localhost:3000/api/v1/ivr/flows?hospitalId=${hospitalId}`);
     const listRes = await getFlows(listReq);
     const listJson = await listRes.json();
-    const targetFlow = listJson.data[0];
+    const targetFlow = listJson.data.find((f: { nodes: unknown[] }) => f.nodes.length > 0) || listJson.data[0];
 
     const pubReq = new NextRequest(`http://localhost:3000/api/v1/ivr/flows/${targetFlow.id}/publish`, {
       method: "POST",

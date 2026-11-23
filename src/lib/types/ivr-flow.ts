@@ -14,15 +14,38 @@ export type FlowNodeType =
   | "IVR_MENU"
   | "DTMF_INPUT"
   | "AI_VOICE_AGENT"
-  | "HUMAN_TRANSFER"
+  | "DIRECT_AI_RECEPTIONIST"
+  | "EMERGENCY_MONITOR"
   | "EMERGENCY_HANDLING"
-  | "BUSINESS_HOURS"
+  | "LANGUAGE_DETECTION"
+  | "INTENT_DETECTION"
+  | "CONDITION_BRANCH"
   | "DEPARTMENT_SELECTION"
+  | "APPOINTMENT_FLOW"
+  | "BILLING_FLOW"
+  | "REUSABLE_SUBFLOW"
+  | "RETURN_SUBFLOW"
+  | "HUMAN_TRANSFER"
+  | "BUSINESS_HOURS"
+  | "AFTER_HOURS"
   | "QUEUE_WAITING"
   | "TIMEOUT"
   | "INVALID_INPUT"
   | "REPEAT_MENU"
+  | "ERROR_HANDLER"
   | "END_CALL";
+
+export type FlowCategory =
+  | "INBOUND_RECEPTION"
+  | "EMERGENCY_ESCALATION"
+  | "DEPARTMENT_ROUTING"
+  | "AFTER_HOURS"
+  | "APPOINTMENT"
+  | "BILLING_INSURANCE"
+  | "HUMAN_HANDOFF"
+  | "LAB_ENQUIRIES"
+  | "DOCTOR_INFO"
+  | "CUSTOM";
 
 export type IvrFlowStatus = "DRAFT" | "VALIDATED" | "PUBLISHED" | "ARCHIVED";
 
@@ -47,14 +70,25 @@ export type FlowNodeData =
   | IvrMenuNodeData
   | DtmfInputNodeData
   | AiVoiceAgentNodeData
-  | HumanTransferNodeData
+  | DirectAiReceptionistNodeData
+  | EmergencyMonitorNodeData
   | EmergencyHandlingNodeData
-  | BusinessHoursNodeData
+  | LanguageDetectionNodeData
+  | IntentDetectionNodeData
+  | ConditionBranchNodeData
   | DepartmentSelectionNodeData
+  | AppointmentFlowNodeData
+  | BillingFlowNodeData
+  | ReusableSubflowNodeData
+  | ReturnSubflowNodeData
+  | HumanTransferNodeData
+  | BusinessHoursNodeData
+  | AfterHoursNodeData
   | QueueWaitingNodeData
   | TimeoutNodeData
   | InvalidInputNodeData
   | RepeatMenuNodeData
+  | ErrorHandlerNodeData
   | EndCallNodeData
   | Record<string, unknown>;
 
@@ -234,6 +268,101 @@ export interface EndCallNodeData {
   hangupReason: "NORMAL_COMPLETION" | "CALLER_HANGUP" | "TIMEOUT_EXCEEDED" | "EMERGENCY_ESCALATED" | "TRANSFER_FAILED";
 }
 
+export interface DirectAiReceptionistNodeData {
+  initialGreetingEnglish: string;
+  initialGreetingMalayalam?: string;
+  autoDetectLanguage: boolean;
+  supportedLanguages: string[];
+  sarvamSttModel: string;
+  sarvamTtsModel: string;
+  sarvamSpeaker: string;
+  speakingPace: number;
+  emergencyInterruptionEnabled: boolean;
+}
+
+export interface EmergencyMonitorNodeData {
+  continuousMonitoring: boolean;
+  confidenceThreshold: number;
+  emergencyFlowId?: string;
+  cancelOngoingSpeech: boolean;
+  announcementEnglish?: string;
+  announcementMalayalam?: string;
+}
+
+export interface LanguageDetectionNodeData {
+  defaultLanguage: "ml-IN" | "en-IN" | "hi-IN";
+  detectionTimeoutMs: number;
+  autoSwitchPace: boolean;
+}
+
+export interface IntentDetectionNodeData {
+  intents: Array<{
+    id: string;
+    name: string;
+    targetPortId: string;
+    samplePhrases: string[];
+  }>;
+  fallbackPortId: string;
+}
+
+export interface ConditionBranchNodeData {
+  conditions: Array<{
+    variable: string;
+    operator: "EQUALS" | "NOT_EQUALS" | "CONTAINS" | "EXISTS" | "GREATER_THAN";
+    value: string;
+    targetPortId: string;
+  }>;
+  defaultPortId: string;
+}
+
+export interface ReusableSubflowNodeData {
+  targetFlowId: string;
+  targetFlowCategory?: FlowCategory;
+  targetVersion?: number; // lock to specific version or latest published
+  passVariables: boolean;
+  onReturnPortId: string;
+  onErrorPortId: string;
+}
+
+export interface ReturnSubflowNodeData {
+  returnStatus: "SUCCESS" | "CANCELLED" | "COMPLETED" | "FAILED";
+  returnVariables?: Record<string, unknown>;
+}
+
+export interface AppointmentFlowNodeData {
+  allowDemoBooking: boolean;
+  hmsIntegrationMode: "DEMO_SANDBOX" | "LIVE_REST";
+  supportedDepartments: string[];
+}
+
+export interface BillingFlowNodeData {
+  insuranceTpaSupported: boolean;
+  cashlessEnquiryEnabled: boolean;
+  billingDeskExtension: string;
+}
+
+export interface AfterHoursNodeData {
+  afterHoursGreetingEnglish: string;
+  afterHoursGreetingMalayalam: string;
+  emergencyTransferAllowed: boolean;
+  casualtyNumber: string;
+}
+
+export interface ErrorHandlerNodeData {
+  errorPromptMalayalam: string;
+  errorPromptEnglish: string;
+  action: "RETRY" | "TRANSFER_CASUALTY" | "HANGUP";
+}
+
+export interface SubflowCallFrame {
+  parentFlowId: string;
+  parentFlowVersion: number;
+  returnNodeId: string;
+  returnPortId: string;
+  invokedAt: string;
+  frameVariables?: Record<string, unknown>;
+}
+
 // ----------------------------------------------------
 // FLOW GRAPH & VERSIONING
 // ----------------------------------------------------
@@ -258,6 +387,13 @@ export interface IvrFlowData {
   deploymentStatus: ExotelDeploymentStatus;
   isDefault: boolean;
   currentVersion: number;
+  category: FlowCategory;
+  direction: "INBOUND" | "OUTBOUND";
+  executionPriority: number;
+  triggerConditions?: Record<string, unknown>;
+  isEnabled: boolean;
+  isTemplate: boolean;
+  templateCategory?: string;
   nodes: FlowNode[];
   edges: FlowEdge[];
   variables: Record<string, unknown>;
@@ -277,6 +413,10 @@ export interface IvrFlowVersionData {
   snapshot: {
     name: string;
     description?: string;
+    category?: FlowCategory;
+    direction?: "INBOUND" | "OUTBOUND";
+    executionPriority?: number;
+    triggerConditions?: Record<string, unknown>;
     nodes: FlowNode[];
     edges: FlowEdge[];
     variables: Record<string, unknown>;
@@ -324,11 +464,23 @@ export interface FlowExecutionContext {
   turnCount: number;
   retryCounts: Record<string, number>;
   isEmergency: boolean;
+  subflowStack: SubflowCallFrame[];
+  activeFlowId: string;
+  rootFlowId: string;
+  executionPriority: "NORMAL" | "HIGH" | "EMERGENCY";
 }
 
 export interface FlowExecutionStepResult {
   nextNodeId: string | null;
-  action: "PLAY_AUDIO" | "COLLECT_DTMF" | "STREAM_AI_AGENT" | "TRANSFER_CALL" | "HANGUP" | "EMERGENCY_ESCALATE";
+  action:
+    | "PLAY_AUDIO"
+    | "COLLECT_DTMF"
+    | "STREAM_AI_AGENT"
+    | "TRANSFER_CALL"
+    | "HANGUP"
+    | "EMERGENCY_ESCALATE"
+    | "INVOKE_SUBFLOW"
+    | "RETURN_FROM_SUBFLOW";
   audioText?: string;
   audioLanguage?: "ml-IN" | "en-IN" | "hi-IN";
   ttsSpeaker?: string;
@@ -340,6 +492,12 @@ export interface FlowExecutionStepResult {
     agentId: string;
     agentName: string;
     version: number;
+  };
+  subflowTarget?: {
+    flowId: string;
+    version?: number;
+    onReturnNodeId: string;
+    onReturnPortId: string;
   };
   logMessage: string;
   isTerminal: boolean;

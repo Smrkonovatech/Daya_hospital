@@ -14,7 +14,12 @@ export async function GET(request: NextRequest) {
   }
 
   const hospitalId = request.nextUrl.searchParams.get("hospitalId") || "hosp_daya_thrissur";
-  const flows = await ivrFlowService.getFlowsByHospital(hospitalId);
+  const category = request.nextUrl.searchParams.get("category");
+  let flows = await ivrFlowService.getFlowsByHospital(hospitalId);
+
+  if (category) {
+    flows = flows.filter((f) => f.category === category);
+  }
 
   return NextResponse.json({
     success: true,
@@ -60,6 +65,11 @@ export async function POST(request: NextRequest) {
         name: body.name.trim(),
         description: body.description || template.description,
         isDefault: body.isDefault ?? false,
+        category: body.category || template.category,
+        direction: body.direction || template.direction,
+        executionPriority: body.executionPriority ?? template.executionPriority,
+        nodes: body.nodes || template.nodes,
+        edges: body.edges || template.edges,
       },
       userName
     );

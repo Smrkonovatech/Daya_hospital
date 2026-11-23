@@ -245,6 +245,159 @@ export const NODE_TYPE_REGISTRY: Record<FlowNodeType, NodeTypeMetadata> = {
     iconName: "PhoneOff",
     badgeColor: "bg-slate-200 text-slate-900 border-slate-400 font-medium",
   },
+  DIRECT_AI_RECEPTIONIST: {
+    type: "DIRECT_AI_RECEPTIONIST",
+    title: "Direct AI Receptionist",
+    category: "AGENT_TRANSFER",
+    description: "Direct multilingual Sarvam AI voice reception with auto language detection",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "call_completed", label: "Query Resolved", direction: "output" },
+      { id: "emergency_escalation", label: "Emergency Triggered", direction: "output" },
+      { id: "department_transfer", label: "Transfer to Dept", direction: "output" },
+      { id: "human_handoff", label: "Human Staff Handoff", direction: "output" },
+      { id: "error", label: "Service Error", direction: "output" },
+    ],
+    iconName: "Sparkles",
+    badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold",
+  },
+  EMERGENCY_MONITOR: {
+    type: "EMERGENCY_MONITOR",
+    title: "Emergency Monitor",
+    category: "SAFETY",
+    description: "Continuous background multilingual emergency phrase detection with sub-50ms reaction",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "emergency_detected", label: "Emergency Escalation", direction: "output" },
+      { id: "normal_flow", label: "Normal Flow", direction: "output" },
+    ],
+    iconName: "ShieldAlert",
+    badgeColor: "bg-red-100 text-red-800 border-red-300 font-bold",
+  },
+  LANGUAGE_DETECTION: {
+    type: "LANGUAGE_DETECTION",
+    title: "Language Detection",
+    category: "INTERACTION",
+    description: "Automatically detects Malayalam, English, or Manglish from live caller speech",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "lang_ml", label: "Malayalam (ml-IN)", direction: "output" },
+      { id: "lang_en", label: "English (en-IN)", direction: "output" },
+      { id: "lang_hi", label: "Hindi (hi-IN)", direction: "output" },
+    ],
+    iconName: "Globe",
+    badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-300",
+  },
+  INTENT_DETECTION: {
+    type: "INTENT_DETECTION",
+    title: "Intent Detection",
+    category: "INTERACTION",
+    description: "Branches to subflows or actions based on caller speech intent",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "emergency", label: "Emergency", direction: "output" },
+      { id: "appointment", label: "Appointments", direction: "output" },
+      { id: "billing", label: "Billing & Insurance", direction: "output" },
+      { id: "department", label: "Departments", direction: "output" },
+      { id: "lab", label: "Lab Reports", direction: "output" },
+      { id: "doctor_info", label: "Doctor Timings", direction: "output" },
+      { id: "human_handoff", label: "Human Staff", direction: "output" },
+      { id: "fallback", label: "Fallback", direction: "output" },
+    ],
+    iconName: "Cpu",
+    badgeColor: "bg-violet-100 text-violet-800 border-violet-300",
+  },
+  CONDITION_BRANCH: {
+    type: "CONDITION_BRANCH",
+    title: "Condition Branch",
+    category: "FLOW_CONTROL",
+    description: "Branches flow dynamically based on context or caller variables",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "true", label: "Condition Met", direction: "output" },
+      { id: "false", label: "Default / Else", direction: "output" },
+    ],
+    iconName: "GitBranch",
+    badgeColor: "bg-amber-100 text-amber-800 border-amber-300",
+  },
+  APPOINTMENT_FLOW: {
+    type: "APPOINTMENT_FLOW",
+    title: "Appointment Subflow",
+    category: "AGENT_TRANSFER",
+    description: "Handles doctor schedule lookup, slot booking, and consultation enquiries",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "booked", label: "Appointment Booked", direction: "output" },
+      { id: "cancelled", label: "Cancelled / Handoff", direction: "output" },
+      { id: "fallback", label: "Fallback", direction: "output" },
+    ],
+    iconName: "Calendar",
+    badgeColor: "bg-teal-100 text-teal-800 border-teal-300",
+  },
+  BILLING_FLOW: {
+    type: "BILLING_FLOW",
+    title: "Billing & Insurance Subflow",
+    category: "AGENT_TRANSFER",
+    description: "Handles cashless insurance, Medisep, and billing desk inquiries",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "resolved", label: "Enquiry Resolved", direction: "output" },
+      { id: "transfer_billing", label: "Transfer Billing Desk", direction: "output" },
+    ],
+    iconName: "CreditCard",
+    badgeColor: "bg-green-100 text-green-800 border-green-300",
+  },
+  REUSABLE_SUBFLOW: {
+    type: "REUSABLE_SUBFLOW",
+    title: "Reusable Subflow",
+    category: "FLOW_CONTROL",
+    description: "Invokes an independent modular subflow with call stack return tracking",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "return", label: "Return from Subflow", direction: "output" },
+      { id: "error", label: "Subflow Error", direction: "output" },
+    ],
+    iconName: "Layers",
+    badgeColor: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300",
+  },
+  RETURN_SUBFLOW: {
+    type: "RETURN_SUBFLOW",
+    title: "Return from Subflow",
+    category: "FLOW_CONTROL",
+    description: "Returns execution context and control back to the invoking parent flow",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [],
+    iconName: "CornerDownLeft",
+    badgeColor: "bg-pink-100 text-pink-800 border-pink-300",
+  },
+  AFTER_HOURS: {
+    type: "AFTER_HOURS",
+    title: "After-Hours Subflow",
+    category: "FLOW_CONTROL",
+    description: "Night & weekend triage flow offering morning booking or casualty transfer",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "casualty_transfer", label: "Casualty Transfer", direction: "output" },
+      { id: "morning_booking", label: "Morning Booking Recorded", direction: "output" },
+      { id: "end_call", label: "End Call", direction: "output" },
+    ],
+    iconName: "Moon",
+    badgeColor: "bg-purple-100 text-purple-800 border-purple-300",
+  },
+  ERROR_HANDLER: {
+    type: "ERROR_HANDLER",
+    title: "Error Handler",
+    category: "SAFETY",
+    description: "Catches unexpected flow exceptions and safeguards patient experience",
+    defaultInputs: [{ id: "in", label: "In", direction: "input" }],
+    defaultOutputs: [
+      { id: "retry", label: "Retry", direction: "output" },
+      { id: "transfer_casualty", label: "Escalate to Casualty", direction: "output" },
+      { id: "hangup", label: "Graceful Hangup", direction: "output" },
+    ],
+    iconName: "AlertOctagon",
+    badgeColor: "bg-red-100 text-red-800 border-red-300",
+  },
 };
 
 /**
@@ -433,6 +586,111 @@ export function createDefaultNode(
         goodbyePromptEnglish: `Thank you for calling ${hospName}. Have a good day.`,
         hangupReason: "NORMAL_COMPLETION",
       } as EndCallNodeData;
+      break;
+
+    case "DIRECT_AI_RECEPTIONIST":
+      data = {
+        initialGreetingEnglish: `Hello, thank you for calling ${hospName}. How may I help you today?`,
+        initialGreetingMalayalam: `നമസ്കാരം, ${hospName}-ലേക്ക് സ്വാഗതം. ഞാൻ എങ്ങനെ സഹായിക്കണം?`,
+        autoDetectLanguage: true,
+        supportedLanguages: ["en-IN", "ml-IN"],
+        sarvamSttModel: "saaras:v4",
+        sarvamTtsModel: "bulbul:v3",
+        sarvamSpeaker: "kavitha",
+        speakingPace: 1.15,
+        emergencyInterruptionEnabled: true,
+      };
+      break;
+
+    case "EMERGENCY_MONITOR":
+      data = {
+        continuousMonitoring: true,
+        confidenceThreshold: 0.7,
+        cancelOngoingSpeech: true,
+        announcementEnglish: "Connecting you to Emergency Casualty immediately. Please stay on the line.",
+        announcementMalayalam: "അടിയന്തിര കാഷ്വാലിറ്റി വിഭാഗത്തിലേക്ക് കണക്ട് ചെയ്യുന്നു. ദയവായി കാത്തിരിക്കുക.",
+      };
+      break;
+
+    case "LANGUAGE_DETECTION":
+      data = {
+        defaultLanguage: "ml-IN",
+        detectionTimeoutMs: 2500,
+        autoSwitchPace: true,
+      };
+      break;
+
+    case "INTENT_DETECTION":
+      data = {
+        intents: [
+          { id: "emergency", name: "Emergency", targetPortId: "emergency", samplePhrases: ["emergency", "accident", "chest pain"] },
+          { id: "appointment", name: "Appointments", targetPortId: "appointment", samplePhrases: ["book doctor", "appointment", "doctor timing"] },
+          { id: "billing", name: "Billing", targetPortId: "billing", samplePhrases: ["insurance", "cashless", "bill", "medisep"] },
+          { id: "department", name: "Departments", targetPortId: "department", samplePhrases: ["cardiology", "ortho", "paediatric"] },
+          { id: "lab", name: "Lab Reports", targetPortId: "lab", samplePhrases: ["blood test", "lab report", "test result"] },
+          { id: "doctor_info", name: "Doctor Information", targetPortId: "doctor_info", samplePhrases: ["visiting doctor", "specialist", "timings"] },
+          { id: "human_handoff", name: "Staff Transfer", targetPortId: "human_handoff", samplePhrases: ["speak to human", "operator", "receptionist"] },
+        ],
+        fallbackPortId: "fallback",
+      };
+      break;
+
+    case "CONDITION_BRANCH":
+      data = {
+        conditions: [
+          { variable: "isEmergency", operator: "EQUALS", value: "true", targetPortId: "true" },
+        ],
+        defaultPortId: "false",
+      };
+      break;
+
+    case "APPOINTMENT_FLOW":
+      data = {
+        allowDemoBooking: true,
+        hmsIntegrationMode: "DEMO_SANDBOX",
+        supportedDepartments: ["Cardiology", "Orthopaedics", "General Medicine", "Paediatrics"],
+      };
+      break;
+
+    case "BILLING_FLOW":
+      data = {
+        insuranceTpaSupported: true,
+        cashlessEnquiryEnabled: true,
+        billingDeskExtension: "104",
+      };
+      break;
+
+    case "REUSABLE_SUBFLOW":
+      data = {
+        targetFlowId: "",
+        passVariables: true,
+        onReturnPortId: "return",
+        onErrorPortId: "error",
+      };
+      break;
+
+    case "RETURN_SUBFLOW":
+      data = {
+        returnStatus: "COMPLETED",
+        returnVariables: {},
+      };
+      break;
+
+    case "AFTER_HOURS":
+      data = {
+        afterHoursGreetingEnglish: `Thank you for calling ${hospName}. Our regular OPD counters are currently closed (operating hours 08:00 AM to 08:00 PM).`,
+        afterHoursGreetingMalayalam: `${hospName}-ലേക്ക് വിളിച്ചതിന് നന്ദി. ഒപി വിഭാഗം ഇപ്പോൾ പ്രവർത്തിക്കുന്നില്ല (പ്രവർത്തന സമയം രാവിലെ 8 മുതൽ രാത്രി 8 വരെ).`,
+        emergencyTransferAllowed: true,
+        casualtyNumber: emergencyNum,
+      };
+      break;
+
+    case "ERROR_HANDLER":
+      data = {
+        errorPromptMalayalam: "സാങ്കേതിക തകരാർ കാരണം ക്ഷമ ചോദിക്കുന്നു. ദയവായി കാത്തിരിക്കുക.",
+        errorPromptEnglish: "We are experiencing a temporary error. Please hold while we reconnect.",
+        action: "TRANSFER_CASUALTY",
+      };
       break;
   }
 
@@ -637,6 +895,11 @@ export function createDefaultHospitalFlow(
     deploymentStatus: "EXOTEL_MAPPING_VERIFIED",
     isDefault: true,
     currentVersion: 1,
+    category: "INBOUND_RECEPTION",
+    direction: "INBOUND",
+    executionPriority: 0,
+    isEnabled: true,
+    isTemplate: false,
     nodes,
     edges,
     variables: {

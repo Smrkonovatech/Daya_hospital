@@ -93,8 +93,7 @@ describe("Live IVR Runtime Gateway Integration (Phase 4.1)", () => {
     });
 
     session.markStarted();
-    // Allow async flow resolution and initial step
-    await new Promise((r) => setTimeout(r, 100));
+    await session.waitForInitialization();
 
     expect(session.isExecutingIvrFlow).toBe(true);
     expect(session.ivrFlow).toBeDefined();
@@ -344,7 +343,7 @@ describe("Live IVR Runtime Gateway Integration (Phase 4.1)", () => {
     (session as unknown as { hospitalId: string }).hospitalId = unknownHospitalId;
 
     session.markStarted();
-    await new Promise((r) => setTimeout(r, 100));
+    await session.waitForInitialization();
 
     // Verified safe fallback: does not pretend an IVR flow was executed
     expect(session.isExecutingIvrFlow).toBe(false);
@@ -373,7 +372,7 @@ describe("Live IVR Runtime Gateway Integration (Phase 4.1)", () => {
     });
 
     dayaSession.markStarted();
-    await new Promise((r) => setTimeout(r, 60));
+    await dayaSession.waitForInitialization();
 
     expect(dayaSession.hospitalId).toBe(hospitalId);
     expect(dayaSession.ivrFlow?.hospitalId).toBe(hospitalId);

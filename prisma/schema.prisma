@@ -693,6 +693,15 @@ model IvrFlow {
   isDefault            Boolean                @default(false)
   currentVersion       Int                    @default(1)
   
+  // Multi-tenant Flow Orchestration (Phase 4.6)
+  category             String                 @default("INBOUND_RECEPTION") // INBOUND_RECEPTION, EMERGENCY_ESCALATION, DEPARTMENT_ROUTING, AFTER_HOURS, APPOINTMENT, BILLING_INSURANCE, HUMAN_HANDOFF, LAB_ENQUIRIES, DOCTOR_INFO, CUSTOM
+  direction            String                 @default("INBOUND") // INBOUND, OUTBOUND
+  executionPriority    Int                    @default(100) // 1000 for emergency, 100 for standard
+  triggerConditions    Json?                  // e.g. { intent: "EMERGENCY" }, { afterHours: true }
+  isEnabled            Boolean                @default(true)
+  isTemplate           Boolean                @default(false)
+  templateCategory     String?
+  
   // Graph Data
   nodesJson            Json                   // Array<FlowNode>
   edgesJson            Json                   // Array<FlowEdge>
@@ -713,6 +722,8 @@ model IvrFlow {
 
   @@index([hospitalId, status])
   @@index([hospitalId, isDefault])
+  @@index([hospitalId, category])
+  @@index([isTemplate])
 }
 
 model IvrFlowVersion {
@@ -741,7 +752,7 @@ model IvrFlowExecutionSession {
   hospitalId           String
   currentNodeId        String
   variables            Json?
-  status               String                 @default("ACTIVE") // ACTIVE, COMPLETED, TRANSFERRED, FAILED
+  status               String                 @default("ACTIVE") // ACTIVE, COMPLETED, TRANSFERRED, FAILED, EMERGENCY_INTERRUPTED
   executionLog         Json                   // Array of transition logs
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
@@ -751,4 +762,79 @@ model IvrFlowExecutionSession {
   @@index([flowId, versionNumber])
   @@index([callSid])
   @@index([hospitalId, status])
+}
+
+// ----------------------------------------------------
+// 12. MULTI-TENANT ORCHESTRATION & EMERGENCY (PHASE 4.6)
+// ----------------------------------------------------
+
+model EmergencyEvent {
+  id                   String                 @id @default(cuid())
+  hospitalId           String
+  callSid              String
+  flowId               String
+  flowVersion          Int
+  triggerPhrase        String
+  confidenceScore      Float                  @default(1.0)
+  detectedLanguage     String                 @default("ml-IN")
+  targetDestination    String
+  transferOutcome      String                 @default("INITIATED") // INITIATED, CONNECTED, FAILED, FALLBACK_EXPLAINED, SIMULATED
+  fallbackAction       String?
+  callerNumber         String?
+  createdAt            DateTime               @default(now())
+  resolvedAt           DateTime?
+
+  @@index([hospitalId, createdAt])
+  @@index([callSid])
+}
+
+model EmergencyRoutingConfig {
+  id                            String   @id @default(cuid())
+  hospitalId                    String   @unique
+  casualtyNumber                String   @default("100")
+  isVerified                    Boolean  @default(false)
+  verifiedBy                    String?
+  verifiedAt                    DateTime?
+  fallbackNumber                String?
+  allowLiveTransfer             Boolean  @default(false) // Safety: default false until explicitly confirmed
+  interruptionKeywordsMalayalam String[] @default([])
+  interruptionKeywordsEnglish   String[] @default([])
+  interruptionKeywordsManglish  String[] @default([])
+  confidenceThreshold           Float    @default(0.7)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  @@index([hospitalId])
+}
+
+model FlowInvocation {
+  id                   String                 @id @default(cuid())
+  sessionCallSid       String
+  parentFlowId         String
+  childFlowId          String
+  childFlowVersion     Int
+  callDepth            Int                    @default(1)
+  invokedFromNodeId    String
+  status               String                 @default("ACTIVE") // ACTIVE, RETURNED, INTERRUPTED_EMERGENCY, FAILED
+  returnValue          Json?
+  createdAt            DateTime               @default(now())
+  returnedAt           DateTime?
+
+  @@index([sessionCallSid])
+  @@index([parentFlowId])
+  @@index([childFlowId])
+}
+
+model FlowAuditEvent {
+  id                   String                 @id @default(cuid())
+  hospitalId           String
+  flowId               String
+  flowVersion          Int?
+  action               String                 // CREATED, EDITED, CLONED, TESTED, PUBLISHED, DISABLED, ARCHIVED, ROLLED_BACK
+  actor                String
+  details              Json?
+  createdAt            DateTime               @default(now())
+
+  @@index([hospitalId, flowId])
+  @@index([hospitalId, createdAt])
 }

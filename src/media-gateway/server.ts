@@ -112,7 +112,6 @@ export class AgentStreamMediaGateway {
               configured: Boolean(process.env.DATABASE_URL),
               connected: isDbConnected,
               provider: "neon_postgresql",
-              message: dbDetails.message,
             },
             persistenceStatus: persistence.status,
             activeCalls: mediaSessionManager.getActiveSessionCount(),
@@ -345,10 +344,10 @@ export class AgentStreamMediaGateway {
             const to = String(meta.to || rawObj.to || "");
             const customField = String(
               meta.custom_field ||
-                meta.customField ||
-                rawObj.custom_field ||
-                rawObj.customField ||
-                (meta.custom_parameters ? JSON.stringify(meta.custom_parameters) : "")
+              meta.customField ||
+              rawObj.custom_field ||
+              rawObj.customField ||
+              (meta.custom_parameters ? JSON.stringify(meta.custom_parameters) : "")
             );
 
             const rawFormat = (meta.media_format || meta.mediaFormat || {}) as Record<string, unknown>;
@@ -521,7 +520,7 @@ if (require.main === module) {
         .then(() => {
           console.log("[SMRKOMED] Initial Malayalam greeting pre-warmed in TTS audio cache.");
         })
-        .catch(() => {});
+        .catch(() => { });
     })
     .catch((err) => {
       console.error("[SMRKOMED] Failed to start gateway:", err);

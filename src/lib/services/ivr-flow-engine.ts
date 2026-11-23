@@ -30,10 +30,31 @@ import {
   RepeatMenuNodeData,
   EndCallNodeData,
   QueueWaitingNodeData,
+  DirectAiReceptionistNodeData,
+  EmergencyMonitorNodeData,
+  IntentDetectionNodeData,
+  ConditionBranchNodeData,
+  BillingFlowNodeData,
+  ReusableSubflowNodeData,
+  ReturnSubflowNodeData,
+  AfterHoursNodeData,
+  ErrorHandlerNodeData,
+  SubflowCallFrame,
 } from "@/lib/types/ivr-flow";
+import { EmergencyDetector } from "./emergency-detector";
 
 export interface StepInputEvent {
-  type: "START_CALL" | "DTMF_KEY" | "DTMF_DIGITS" | "TIMEOUT" | "AI_COMPLETED" | "AI_HANDOFF" | "EMERGENCY_DETECTED" | "TRANSFER_FAILED";
+  type:
+    | "START_CALL"
+    | "DTMF_KEY"
+    | "DTMF_DIGITS"
+    | "TIMEOUT"
+    | "AI_COMPLETED"
+    | "AI_HANDOFF"
+    | "EMERGENCY_DETECTED"
+    | "TRANSFER_FAILED"
+    | "SUBFLOW_RETURN"
+    | "SPEECH_TRANSCRIPT";
   value?: string;
 }
 
@@ -79,6 +100,10 @@ export class IvrFlowExecutionEngine {
       turnCount: 0,
       retryCounts: {},
       isEmergency: false,
+      subflowStack: [],
+      activeFlowId: flow.id,
+      rootFlowId: flow.id,
+      executionPriority: "NORMAL",
     };
   }
 
@@ -118,14 +143,18 @@ export class IvrFlowExecutionEngine {
     // ----------------------------------------------------
     // 1. EMERGENCY OVERRIDE CHECK
     // ----------------------------------------------------
-    if (input.type === "EMERGENCY_DETECTED") {
-      const emergencyNode = flow.nodes.find((n) => n.type === "EMERGENCY_HANDLING");
+    if (
+      input.type === "EMERGENCY_DETECTED" ||
+      (input.type === "SPEECH_TRANSCRIPT" && input.value && EmergencyDetector.isEmergency(input.value))
+    ) {
+      const emergencyNode = flow.nodes.find((n) => n.type === "EMERGENCY_HANDLING" || n.type === "EMERGENCY_MONITOR");
       if (emergencyNode) {
         context.isEmergency = true;
+        context.executionPriority = "EMERGENCY";
         context.currentNodeId = emergencyNode.id;
         context.history.push({
           nodeId: emergencyNode.id,
-          nodeType: "EMERGENCY_HANDLING",
+          nodeType: emergencyNode.type,
           nodeTitle: emergencyNode.title,
           timestamp: new Date().toISOString(),
           actionTaken: "EMERGENCY_PRIORITY_ESCALATION",
@@ -133,15 +162,21 @@ export class IvrFlowExecutionEngine {
         });
 
         const emData = emergencyNode.data as unknown as EmergencyHandlingNodeData;
-        const text = context.currentLanguage === "en-IN" ? emData.announcementEnglish : emData.announcementMalayalam;
+        const text =
+          context.currentLanguage === "en-IN"
+            ? (emData.announcementEnglish || "Connecting you immediately to the Casualty department.")
+            : (emData.announcementMalayalam || "ഇതൊരു അത്യാഹിത കോളായതിനാൽ ഉടൻ കാഷ്വാലിറ്റിയിലേക്ക് കണക്ട് ചെയ്യുന്നു.");
 
         return {
           nextNodeId: emergencyNode.id,
           action: "EMERGENCY_ESCALATE",
           audioText: text,
           audioLanguage: context.currentLanguage,
-          transferDestination: emData.casualtyDestinationNumber,
-          logMessage: `[EMERGENCY OVERRIDE] Casualty fast-track activated. Transferring to ${emData.casualtyDestinationNumber}`,
+          transferDestination:
+            emData.casualtyDestinationNumber ||
+            (context.variables.casualtyHotline as string) ||
+            "0487 2475100",
+          logMessage: `[EMERGENCY OVERRIDE] Casualty fast-track activated. Transferring to Casualty.`,
           isTerminal: false,
           context,
         };
@@ -477,6 +512,312 @@ export class IvrFlowExecutionEngine {
         break;
       }
 
+      case "DIRECT_AI_RECEPTIONIST": {
+        const directAiData = currentNode.data as unknown as DirectAiReceptionistNodeData;
+        actionResult = "STREAM_AI_AGENT";
+        aiAgentConfig = {
+          agentId: "agent_daya_direct_receptionist",
+          agentName: "Direct Multilingual AI Receptionist",
+          version: 1,
+        };
+
+        if (input.type === "START_CALL" || !input.value) {
+          audioText = directAiData.initialGreetingEnglish || "Thank you for calling Daya Hospital. How may I assist you today?";
+          speakingPace = directAiData.speakingPace || 1.15;
+          ttsSpeaker = directAiData.sarvamSpeaker || "kavitha";
+          logMessage = `Starting Direct AI Receptionist. Initial greeting: "${audioText}"`;
+        } else if (input.type === "AI_COMPLETED") {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "call_completed");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Direct AI Receptionist completed query. Routing to ${nextNodeId}.`;
+        } else if (input.type === "AI_HANDOFF") {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "human_handoff");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Direct AI Receptionist requested human staff handoff.`;
+        } else if (input.type === "EMERGENCY_DETECTED") {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "emergency_escalation");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Direct AI Receptionist triggered emergency escalation.`;
+        } else {
+          const transcript = input.value || "";
+          if (EmergencyDetector.isEmergency(transcript)) {
+            context.isEmergency = true;
+            context.executionPriority = "EMERGENCY";
+            const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "emergency_escalation");
+            nextNodeId = edge ? edge.targetNodeId : null;
+            actionResult = "EMERGENCY_ESCALATE";
+            logMessage = `Emergency detected in caller speech during Direct AI Reception turn.`;
+          } else {
+            logMessage = `Direct AI Receptionist processing speech turn.`;
+          }
+        }
+        break;
+      }
+
+      case "EMERGENCY_MONITOR": {
+        const emMonData = currentNode.data as unknown as EmergencyMonitorNodeData;
+        const text = input.value || "";
+        const match = EmergencyDetector.evaluate(text, emMonData.confidenceThreshold || 0.7);
+
+        if (match.isEmergency) {
+          context.isEmergency = true;
+          context.executionPriority = "EMERGENCY";
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "emergency_detected");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          actionResult = "EMERGENCY_ESCALATE";
+          audioText =
+            context.currentLanguage === "en-IN"
+              ? (emMonData.announcementEnglish || "Connecting to emergency casualty.")
+              : (emMonData.announcementMalayalam || "കാഷ്വാലിറ്റിയിലേക്ക് കണക്ട് ചെയ്യുന്നു.");
+          logMessage = `Emergency Monitor triggered on '${match.matchedPhrase}' (confidence: ${match.confidenceScore.toFixed(2)}).`;
+        } else {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "normal_flow");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Emergency Monitor: normal speech evaluated. Advancing to ${nextNodeId}.`;
+        }
+        break;
+      }
+
+      case "LANGUAGE_DETECTION": {
+        const text = input.value || "";
+        const hasMalayalam = /[\u0D00-\u0D7F]/.test(text);
+        const detectedLang = hasMalayalam ? "ml-IN" : "en-IN";
+        context.currentLanguage = detectedLang;
+        const portId = detectedLang === "ml-IN" ? "lang_ml" : "lang_en";
+        const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === portId);
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `Language detected as ${detectedLang}. Routing to ${nextNodeId}.`;
+        break;
+      }
+
+      case "INTENT_DETECTION": {
+        const intentData = currentNode.data as unknown as IntentDetectionNodeData;
+        const text = (input.value || "").toLowerCase();
+
+        if (EmergencyDetector.isEmergency(text)) {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "emergency");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Intent Detection: emergency intent recognized.`;
+          break;
+        }
+
+        let matchedPortId: string | null = null;
+        if (intentData.intents && intentData.intents.length > 0) {
+          for (const intent of intentData.intents) {
+            if (text.includes(intent.id.toLowerCase()) || text.includes(intent.name.toLowerCase())) {
+              matchedPortId = intent.targetPortId;
+              break;
+            }
+            if (intent.samplePhrases && intent.samplePhrases.some((phrase) => text.includes(phrase.toLowerCase()))) {
+              matchedPortId = intent.targetPortId;
+              break;
+            }
+          }
+        }
+
+        if (!matchedPortId) {
+          if (text.includes("appoint") || text.includes("book") || text.includes("doctor") || text.includes("ടോക്കൺ")) {
+            matchedPortId = "appointment";
+          } else if (text.includes("bill") || text.includes("insurance") || text.includes("tpa") || text.includes("medisep")) {
+            matchedPortId = "billing";
+          } else if (text.includes("cardio") || text.includes("ortho") || text.includes("department") || text.includes("വിഭാഗം")) {
+            matchedPortId = "department";
+          } else if (text.includes("lab") || text.includes("blood") || text.includes("report") || text.includes("റിപ്പോർട്ട്")) {
+            matchedPortId = "lab";
+          } else if (text.includes("staff") || text.includes("reception") || text.includes("human") || text.includes("ആളോട്")) {
+            matchedPortId = "human_handoff";
+          } else {
+            matchedPortId = intentData.fallbackPortId || "fallback";
+          }
+        }
+
+        const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === matchedPortId);
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `Intent matched: '${matchedPortId}'. Routing to ${nextNodeId}.`;
+        break;
+      }
+
+      case "CONDITION_BRANCH": {
+        const condData = currentNode.data as unknown as ConditionBranchNodeData;
+        let targetPort = condData.defaultPortId || "false";
+
+        if (condData.conditions && condData.conditions.length > 0) {
+          for (const cond of condData.conditions) {
+            const val = String(context.variables[cond.variable] ?? "");
+            let met = false;
+            switch (cond.operator) {
+              case "EQUALS":
+                met = val.toLowerCase() === cond.value.toLowerCase();
+                break;
+              case "NOT_EQUALS":
+                met = val.toLowerCase() !== cond.value.toLowerCase();
+                break;
+              case "CONTAINS":
+                met = val.toLowerCase().includes(cond.value.toLowerCase());
+                break;
+              case "EXISTS":
+                met = val.trim().length > 0;
+                break;
+              case "GREATER_THAN":
+                met = Number(val) > Number(cond.value);
+                break;
+            }
+            if (met) {
+              targetPort = cond.targetPortId;
+              break;
+            }
+          }
+        }
+
+        const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === targetPort);
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `Condition branch resolved to '${targetPort}'. Routing to ${nextNodeId}.`;
+        break;
+      }
+
+      case "REUSABLE_SUBFLOW": {
+        const subflowData = currentNode.data as unknown as ReusableSubflowNodeData;
+        const targetFlowId =
+          subflowData.targetFlowId ||
+          (subflowData.targetFlowCategory ? `category_${subflowData.targetFlowCategory}` : "");
+
+        if (!context.subflowStack) {
+          context.subflowStack = [];
+        }
+
+        // 1. Max stack depth check (limit 5)
+        if (context.subflowStack.length >= 5) {
+          logMessage = `Subflow invocation rejected: maximum call stack depth (5) reached.`;
+          const errorEdge = flow.edges.find(
+            (e) => e.sourceNodeId === currentNode.id && e.sourcePortId === (subflowData.onErrorPortId || "error")
+          );
+          nextNodeId = errorEdge ? errorEdge.targetNodeId : null;
+          break;
+        }
+
+        // 2. Loop/Cycle Detection
+        const isRecursiveCycle = context.subflowStack.some((frame) => frame.parentFlowId === targetFlowId);
+        if (isRecursiveCycle) {
+          logMessage = `Subflow invocation rejected: recursive cycle detected for flow '${targetFlowId}'.`;
+          const errorEdge = flow.edges.find(
+            (e) => e.sourceNodeId === currentNode.id && e.sourcePortId === (subflowData.onErrorPortId || "error")
+          );
+          nextNodeId = errorEdge ? errorEdge.targetNodeId : null;
+          break;
+        }
+
+        // 3. Push call frame
+        const frame: SubflowCallFrame = {
+          parentFlowId: context.activeFlowId || flow.id,
+          parentFlowVersion: context.flowVersion,
+          returnNodeId: currentNode.id,
+          returnPortId: subflowData.onReturnPortId || "return",
+          invokedAt: new Date().toISOString(),
+          frameVariables: subflowData.passVariables ? { ...context.variables } : undefined,
+        };
+        context.subflowStack.push(frame);
+
+        return {
+          nextNodeId: null,
+          action: "INVOKE_SUBFLOW",
+          subflowTarget: {
+            flowId: targetFlowId,
+            version: subflowData.targetVersion,
+            onReturnNodeId: currentNode.id,
+            onReturnPortId: subflowData.onReturnPortId || "return",
+          },
+          logMessage: `[SUBFLOW INVOKE] Pushed frame to call stack (depth: ${context.subflowStack.length}). Invoking target '${targetFlowId}'.`,
+          isTerminal: false,
+          context,
+        };
+      }
+
+      case "RETURN_SUBFLOW": {
+        const returnData = currentNode.data as unknown as ReturnSubflowNodeData;
+        if (!context.subflowStack || context.subflowStack.length === 0) {
+          actionResult = "HANGUP";
+          isTerminal = true;
+          logMessage = `Flow completed via ReturnSubflow with status '${returnData.returnStatus || "COMPLETED"}'.`;
+          break;
+        }
+
+        const poppedFrame = context.subflowStack.pop()!;
+        if (returnData.returnVariables) {
+          Object.assign(context.variables, returnData.returnVariables);
+        }
+
+        return {
+          nextNodeId: poppedFrame.returnNodeId,
+          action: "RETURN_FROM_SUBFLOW",
+          logMessage: `[SUBFLOW RETURN] Returned from subflow to parent '${poppedFrame.parentFlowId}' (remaining depth: ${context.subflowStack.length}).`,
+          isTerminal: false,
+          context,
+        };
+      }
+
+      case "AFTER_HOURS": {
+        const ahData = currentNode.data as unknown as AfterHoursNodeData;
+        const text = input.value || "";
+        if (EmergencyDetector.isEmergency(text)) {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "casualty_transfer");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          actionResult = "EMERGENCY_ESCALATE";
+          transferDestination = ahData.casualtyNumber || "0487 2475100";
+          logMessage = `Emergency detected during after-hours. Connecting to casualty.`;
+        } else if (text.includes("book") || text.includes("morning") || text.includes("appointment")) {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "morning_booking");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Caller requested morning booking during after-hours.`;
+        } else {
+          actionResult = "PLAY_AUDIO";
+          audioText = context.currentLanguage === "en-IN" ? ahData.afterHoursGreetingEnglish : ahData.afterHoursGreetingMalayalam;
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "end_call");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Playing after-hours announcement.`;
+        }
+        break;
+      }
+
+      case "APPOINTMENT_FLOW": {
+        actionResult = "STREAM_AI_AGENT";
+        aiAgentConfig = {
+          agentId: "agent_appointment_booking",
+          agentName: "Appointment Scheduling Assistant",
+          version: 1,
+        };
+        const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "booked");
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `Appointment subflow executed. Advancing to ${nextNodeId}.`;
+        break;
+      }
+
+      case "BILLING_FLOW": {
+        const billData = currentNode.data as unknown as BillingFlowNodeData;
+        const text = (input.value || "").toLowerCase();
+        if (text.includes("desk") || text.includes("person") || text.includes("executive")) {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "transfer_billing");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          actionResult = "TRANSFER_CALL";
+          transferDestination = billData.billingDeskExtension || "104";
+          logMessage = `Transferring to Billing Desk extension ${transferDestination}.`;
+        } else {
+          const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id && e.sourcePortId === "resolved");
+          nextNodeId = edge ? edge.targetNodeId : null;
+          logMessage = `Billing inquiry handled. Advancing to ${nextNodeId}.`;
+        }
+        break;
+      }
+
+      case "ERROR_HANDLER": {
+        const errData = currentNode.data as unknown as ErrorHandlerNodeData;
+        audioText = context.currentLanguage === "en-IN" ? errData.errorPromptEnglish : errData.errorPromptMalayalam;
+        actionResult = errData.action === "TRANSFER_CASUALTY" ? "EMERGENCY_ESCALATE" : "HANGUP";
+        const edge = flow.edges.find((e) => e.sourceNodeId === currentNode.id);
+        nextNodeId = edge ? edge.targetNodeId : null;
+        logMessage = `Error handler triggered with action '${errData.action}'.`;
+        break;
+      }
+
       default: {
         const nextEdge = flow.edges.find((e) => e.sourceNodeId === currentNode.id);
         nextNodeId = nextEdge ? nextEdge.targetNodeId : null;
@@ -566,29 +907,6 @@ export class IvrFlowExecutionEngine {
    */
   public static detectEmergencyIntent(text: string): boolean {
     if (!text) return false;
-    const lower = text.toLowerCase().trim();
-    const emergencyKeywords = [
-      "emergency",
-      "എമർജൻസി",
-      "accident",
-      "ആക്സിഡന്റ്",
-      "അപകടം",
-      "അടിയന്തിരം",
-      "അടിയന്തരം",
-      "നെഞ്ചുവേദന",
-      "ശ്വാസംമുട്ടൽ",
-      "അത്യാഹിതം",
-      "രക്തം",
-      "ആംബുലൻസ്",
-      "കാഷ്വാലിറ്റി",
-      "casualty",
-      "ambulance",
-      "icu",
-      "serious",
-      "urgent",
-      "heart attack",
-      "stroke",
-    ];
-    return emergencyKeywords.some((kw) => lower.includes(kw));
+    return EmergencyDetector.isEmergency(text);
   }
 }

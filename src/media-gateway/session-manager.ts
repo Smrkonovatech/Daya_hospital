@@ -30,6 +30,7 @@ import { IvrFlowExecutionEngine, StepInputEvent } from "@/lib/services/ivr-flow-
 import { ivrFlowService, IvrFlowService } from "@/lib/services/ivr-flow-service";
 import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/lib/types/ivr-flow";
 import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
+import { EmergencyDetector } from "@/lib/services/emergency-detector";
 
 export interface SocketSender {
   send(data: string, cb?: (err?: Error) => void): void;
@@ -116,6 +117,7 @@ export class CallMediaSession extends EventEmitter {
   public collectedDtmfBuffer = "";
   public lastStepResult?: FlowExecutionStepResult;
   public enableIvrFlow = true;
+  public initPromise?: Promise<void>;
 
   private dtmfTimeoutTimer?: NodeJS.Timeout;
   private isExecutingStep = false;
@@ -206,6 +208,20 @@ export class CallMediaSession extends EventEmitter {
       this.lastCallerTranscript = turn.text;
       this.emit("transcript", turn);
 
+      // Continuous background emergency monitoring on every incoming transcript chunk (interim or final)
+      if (turn.text && turn.text.trim()) {
+        const chunkText = turn.text.trim();
+        const emMatch = EmergencyDetector.evaluate(chunkText, 0.70);
+        if (emMatch.isEmergency && emMatch.requiresImmediateInterruption) {
+          console.warn(`[CallSession ${this.callSid}] [CONTINUOUS EMERGENCY] Detected '${emMatch.matchedPhrase}' (confidence: ${emMatch.confidenceScore.toFixed(2)}). Immediate interruption triggered.`);
+          this.interruptPlayback();
+          if (this.ivrContext) {
+            this.ivrContext.isEmergency = true;
+            this.ivrContext.executionPriority = "EMERGENCY";
+          }
+        }
+      }
+
       if (turn.isFinal && turn.text.trim()) {
         const text = turn.text.trim();
         this.conversationTurns.push({
@@ -217,6 +233,18 @@ export class CallMediaSession extends EventEmitter {
         // 1. Emergency intent check across speech turns (Malayalam, English, and mixed)
         if (IvrFlowExecutionEngine.detectEmergencyIntent(text)) {
           console.log(`[CallSession ${this.callSid}] Emergency keyword detected in caller utterance: "${text}"`);
+          this.interruptPlayback();
+
+          ivrFlowService.logEmergencyEvent({
+            hospitalId: this.hospitalId,
+            callSid: this.callSid,
+            flowId: this.ivrFlow?.id || "flow_main",
+            flowVersion: this.ivrVersion || 1,
+            triggerPhrase: text,
+            targetDestination: (this.ivrContext?.variables?.casualtyHotline as string) || "0487 2475100",
+            callerNumber: this.fromNumber,
+          }).catch((err) => console.warn(`[CallSession ${this.callSid}] Failed to log emergency event:`, err));
+
           if (this.isExecutingIvrFlow) {
             await this.executeIvrStep({ type: "EMERGENCY_DETECTED", value: text });
             return;
@@ -267,14 +295,20 @@ export class CallMediaSession extends EventEmitter {
     this.emit("started", { streamSid: this.streamSid, callSid: this.callSid });
 
     if (this.enableIvrFlow) {
-      this.initiateCallSession().catch((err) => {
+      this.initPromise = this.initiateCallSession().catch((err) => {
         console.error(`[CallSession ${this.callSid}] IVR initialization error:`, err);
         if (this.autoPlayGreeting) {
           this.playInitialGreeting().catch(() => {});
         }
       });
     } else if (this.autoPlayGreeting) {
-      this.playInitialGreeting().catch(() => {});
+      this.initPromise = this.playInitialGreeting().catch(() => {});
+    }
+  }
+
+  public async waitForInitialization(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
     }
   }
 

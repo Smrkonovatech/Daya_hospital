@@ -13,15 +13,21 @@
  */
 
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, EmergencyRoutingConfig, EmergencyEvent, FlowAuditEvent } from "@prisma/client";
 import {
   IvrFlowData,
   IvrFlowVersionData,
   FlowValidationResult,
   ExotelMappingGuide,
+  FlowCategory,
 } from "@/lib/types/ivr-flow";
 import { IvrFlowValidator } from "./ivr-flow-validator";
 import { createDefaultHospitalFlow } from "./ivr-node-definitions";
+import {
+  getFlowTemplatesCatalog,
+  cloneFlowFromTemplate,
+  IvrFlowTemplateSummary,
+} from "./flow-templates";
 
 // Fast in-memory storage fallback for unit testing and local sandboxes
 const inMemoryFlows = new Map<string, IvrFlowData>();
@@ -211,6 +217,13 @@ export class IvrFlowService {
       deploymentStatus: version.deploymentStatus,
       isDefault: selectedFlow.isDefault,
       currentVersion: version.versionNumber,
+      category: version.snapshot.category || selectedFlow.category || "INBOUND_RECEPTION",
+      direction: version.snapshot.direction || selectedFlow.direction || "INBOUND",
+      executionPriority: version.snapshot.executionPriority ?? selectedFlow.executionPriority ?? 0,
+      triggerConditions: version.snapshot.triggerConditions || selectedFlow.triggerConditions,
+      isEnabled: selectedFlow.isEnabled ?? true,
+      isTemplate: selectedFlow.isTemplate ?? false,
+      templateCategory: selectedFlow.templateCategory,
       nodes: version.snapshot.nodes,
       edges: version.snapshot.edges,
       variables: version.snapshot.variables,
@@ -411,6 +424,13 @@ export class IvrFlowService {
       deploymentStatus,
       isDefault: flowData.isDefault ?? existing?.isDefault ?? false,
       currentVersion: existing?.currentVersion ?? 1,
+      category: flowData.category || existing?.category || "INBOUND_RECEPTION",
+      direction: flowData.direction || existing?.direction || "INBOUND",
+      executionPriority: flowData.executionPriority ?? existing?.executionPriority ?? 0,
+      triggerConditions: flowData.triggerConditions || existing?.triggerConditions,
+      isEnabled: flowData.isEnabled ?? existing?.isEnabled ?? true,
+      isTemplate: flowData.isTemplate ?? existing?.isTemplate ?? false,
+      templateCategory: flowData.templateCategory || existing?.templateCategory,
       nodes: flowData.nodes || existing?.nodes || [],
       edges: flowData.edges || existing?.edges || [],
       variables: flowData.variables || existing?.variables || {},
@@ -434,6 +454,13 @@ export class IvrFlowService {
             deploymentStatus: merged.deploymentStatus,
             isDefault: merged.isDefault,
             currentVersion: merged.currentVersion,
+            category: merged.category,
+            direction: merged.direction,
+            executionPriority: merged.executionPriority,
+            triggerConditions: merged.triggerConditions as unknown as Prisma.InputJsonValue,
+            isEnabled: merged.isEnabled,
+            isTemplate: merged.isTemplate,
+            templateCategory: merged.templateCategory,
             nodesJson: merged.nodes as unknown as Prisma.InputJsonValue,
             edgesJson: merged.edges as unknown as Prisma.InputJsonValue,
             variablesJson: merged.variables as unknown as Prisma.InputJsonValue,
@@ -449,6 +476,13 @@ export class IvrFlowService {
             status: merged.status,
             deploymentStatus: merged.deploymentStatus,
             isDefault: merged.isDefault,
+            category: merged.category,
+            direction: merged.direction,
+            executionPriority: merged.executionPriority,
+            triggerConditions: merged.triggerConditions as unknown as Prisma.InputJsonValue,
+            isEnabled: merged.isEnabled,
+            isTemplate: merged.isTemplate,
+            templateCategory: merged.templateCategory,
             nodesJson: merged.nodes as unknown as Prisma.InputJsonValue,
             edgesJson: merged.edges as unknown as Prisma.InputJsonValue,
             variablesJson: merged.variables as unknown as Prisma.InputJsonValue,
@@ -646,6 +680,13 @@ export class IvrFlowService {
       deploymentStatus: "SMRKOMED_DRAFT",
       isDefault: false,
       currentVersion: targetVersion,
+      category: match.snapshot.category || "INBOUND_RECEPTION",
+      direction: match.snapshot.direction || "INBOUND",
+      executionPriority: match.snapshot.executionPriority ?? 0,
+      triggerConditions: match.snapshot.triggerConditions,
+      isEnabled: true,
+      isTemplate: false,
+      templateCategory: undefined,
       nodes: match.snapshot.nodes,
       edges: match.snapshot.edges,
       variables: match.snapshot.variables,
@@ -695,6 +736,287 @@ export class IvrFlowService {
     return { success: true, flow };
   }
 
+  // ----------------------------------------------------
+  // FLOW CENTRE & MULTI-TENANT ORCHESTRATION (PHASE 4.6)
+  // ----------------------------------------------------
+
+  /**
+   * Retrieves IVR flows filtered by category for a hospital.
+   */
+  public async getFlowsByCategory(hospitalId: string, category: FlowCategory): Promise<IvrFlowData[]> {
+    const allFlows = await this.getFlowsByHospital(hospitalId);
+    return allFlows.filter((f) => f.category === category);
+  }
+
+  /**
+   * Returns the catalog of all available hospital flow templates.
+   */
+  public getFlowTemplates(): IvrFlowTemplateSummary[] {
+    return getFlowTemplatesCatalog();
+  }
+
+  /**
+   * Clones a new flow from a template into the hospital's workspace.
+   */
+  public async cloneFromTemplate(
+    templateId: string,
+    hospitalId: string,
+    hospitalName = "Daya Hospital Thrissur",
+    overrides?: Partial<IvrFlowData>,
+    userName = "Hospital Administrator"
+  ): Promise<IvrFlowData> {
+    const cloned = cloneFlowFromTemplate(templateId, hospitalId, hospitalName, overrides);
+    const saved = await this.saveDraft(cloned, userName);
+
+    await this.logAuditEvent({
+      hospitalId,
+      flowId: saved.id,
+      flowVersion: 1,
+      action: "CLONED",
+      actor: userName,
+      details: { templateId, name: saved.name },
+    });
+
+    return saved;
+  }
+
+  /**
+   * Retrieves hospital emergency routing configuration.
+   */
+  public async getEmergencyRoutingConfig(hospitalId: string): Promise<EmergencyRoutingConfig | null> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        const config = await prisma.emergencyRoutingConfig.findUnique({
+          where: { hospitalId },
+        });
+        if (config) return config;
+      } catch (err) {
+        console.warn("[IvrFlowService] DB getEmergencyRoutingConfig failed:", err);
+      }
+    }
+
+    // Default configuration
+    return {
+      id: `em_config_${hospitalId}`,
+      hospitalId,
+      casualtyNumber: "0487 2475100",
+      isVerified: true,
+      verifiedBy: "Hospital Medical Superintendent",
+      verifiedAt: new Date(),
+      fallbackNumber: "108",
+      allowLiveTransfer: false, // development safe default
+      interruptionKeywordsMalayalam: ["നെഞ്ചുവേദന", "ശ്വാസംമുട്ടൽ", "അത്യാഹിതം", "രക്തം", "ആംബുലൻസ്", "കാഷ്വാലിറ്റി"],
+      interruptionKeywordsEnglish: ["chest pain", "emergency", "casualty", "heart attack", "bleeding", "ambulance", "breathing"],
+      interruptionKeywordsManglish: ["nenju vedana", "swasam muttal", "accident", "blood"],
+      confidenceThreshold: 0.7,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  /**
+   * Updates hospital emergency routing configuration.
+   */
+  public async updateEmergencyRoutingConfig(
+    hospitalId: string,
+    config: Partial<EmergencyRoutingConfig>,
+    userName = "Hospital Administrator"
+  ): Promise<EmergencyRoutingConfig> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        const updated = await prisma.emergencyRoutingConfig.upsert({
+          where: { hospitalId },
+          create: {
+            hospitalId,
+            casualtyNumber: config.casualtyNumber || "0487 2475100",
+            isVerified: config.isVerified ?? false,
+            verifiedBy: config.verifiedBy || userName,
+            verifiedAt: config.isVerified ? new Date() : undefined,
+            fallbackNumber: config.fallbackNumber || "108",
+            allowLiveTransfer: config.allowLiveTransfer ?? false,
+            interruptionKeywordsMalayalam: config.interruptionKeywordsMalayalam || [],
+            interruptionKeywordsEnglish: config.interruptionKeywordsEnglish || [],
+            interruptionKeywordsManglish: config.interruptionKeywordsManglish || [],
+            confidenceThreshold: config.confidenceThreshold ?? 0.7,
+          },
+          update: {
+            casualtyNumber: config.casualtyNumber,
+            isVerified: config.isVerified,
+            verifiedBy: config.verifiedBy || userName,
+            verifiedAt: config.isVerified ? new Date() : undefined,
+            fallbackNumber: config.fallbackNumber,
+            allowLiveTransfer: config.allowLiveTransfer,
+            interruptionKeywordsMalayalam: config.interruptionKeywordsMalayalam,
+            interruptionKeywordsEnglish: config.interruptionKeywordsEnglish,
+            interruptionKeywordsManglish: config.interruptionKeywordsManglish,
+            confidenceThreshold: config.confidenceThreshold,
+          },
+        });
+        return updated;
+      } catch (err) {
+        console.warn("[IvrFlowService] DB updateEmergencyRoutingConfig failed:", err);
+      }
+    }
+
+    return {
+      id: `em_config_${hospitalId}`,
+      hospitalId,
+      casualtyNumber: config.casualtyNumber || "0487 2475100",
+      isVerified: config.isVerified ?? false,
+      verifiedBy: config.verifiedBy || userName,
+      verifiedAt: config.isVerified ? new Date() : null,
+      fallbackNumber: config.fallbackNumber || null,
+      allowLiveTransfer: config.allowLiveTransfer ?? false,
+      interruptionKeywordsMalayalam: config.interruptionKeywordsMalayalam || [],
+      interruptionKeywordsEnglish: config.interruptionKeywordsEnglish || [],
+      interruptionKeywordsManglish: config.interruptionKeywordsManglish || [],
+      confidenceThreshold: config.confidenceThreshold ?? 0.7,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  /**
+   * Logs an emergency trigger event.
+   */
+  public async logEmergencyEvent(params: {
+    hospitalId: string;
+    callSid: string;
+    flowId: string;
+    flowVersion: number;
+    triggerPhrase: string;
+    confidenceScore?: number;
+    detectedLanguage?: string;
+    targetDestination: string;
+    transferOutcome?: string;
+    fallbackAction?: string;
+    callerNumber?: string;
+  }): Promise<EmergencyEvent> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        return await prisma.emergencyEvent.create({
+          data: {
+            hospitalId: params.hospitalId,
+            callSid: params.callSid,
+            flowId: params.flowId,
+            flowVersion: params.flowVersion,
+            triggerPhrase: params.triggerPhrase,
+            confidenceScore: params.confidenceScore ?? 1.0,
+            detectedLanguage: params.detectedLanguage || "ml-IN",
+            targetDestination: params.targetDestination,
+            transferOutcome: params.transferOutcome || "INITIATED",
+            fallbackAction: params.fallbackAction,
+            callerNumber: params.callerNumber,
+          },
+        });
+      } catch (err) {
+        console.warn("[IvrFlowService] DB logEmergencyEvent failed:", err);
+      }
+    }
+
+    return {
+      id: `em_event_${Date.now()}`,
+      hospitalId: params.hospitalId,
+      callSid: params.callSid,
+      flowId: params.flowId,
+      flowVersion: params.flowVersion,
+      triggerPhrase: params.triggerPhrase,
+      confidenceScore: params.confidenceScore ?? 1.0,
+      detectedLanguage: params.detectedLanguage || "ml-IN",
+      targetDestination: params.targetDestination,
+      transferOutcome: params.transferOutcome || "INITIATED",
+      fallbackAction: params.fallbackAction || null,
+      callerNumber: params.callerNumber || null,
+      createdAt: new Date(),
+      resolvedAt: null,
+    };
+  }
+
+  /**
+   * Retrieves recent emergency trigger events for a hospital.
+   */
+  public async getEmergencyEvents(hospitalId: string, limit = 50): Promise<EmergencyEvent[]> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        return await prisma.emergencyEvent.findMany({
+          where: { hospitalId },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+        });
+      } catch (err) {
+        console.warn("[IvrFlowService] DB getEmergencyEvents failed:", err);
+      }
+    }
+    return [];
+  }
+
+  /**
+   * Logs a flow audit event.
+   */
+  public async logAuditEvent(params: {
+    hospitalId: string;
+    flowId: string;
+    flowVersion?: number;
+    action: string;
+    actor: string;
+    details?: Record<string, unknown>;
+  }): Promise<FlowAuditEvent> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        return await prisma.flowAuditEvent.create({
+          data: {
+            hospitalId: params.hospitalId,
+            flowId: params.flowId,
+            flowVersion: params.flowVersion,
+            action: params.action,
+            actor: params.actor,
+            details: params.details as unknown as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        console.warn("[IvrFlowService] DB logAuditEvent failed:", err);
+      }
+    }
+
+    return {
+      id: `audit_${Date.now()}`,
+      hospitalId: params.hospitalId,
+      flowId: params.flowId,
+      flowVersion: params.flowVersion ?? null,
+      action: params.action,
+      actor: params.actor,
+      details: (params.details as unknown as Prisma.JsonValue) || null,
+      createdAt: new Date(),
+    };
+  }
+
+  /**
+   * Retrieves audit events for a hospital flow.
+   */
+  public async getAuditEvents(hospitalId: string, flowId?: string): Promise<FlowAuditEvent[]> {
+    const dbStatus = await checkDatabaseConnection();
+    if (dbStatus.connected) {
+      try {
+        return await prisma.flowAuditEvent.findMany({
+          where: {
+            hospitalId,
+            ...(flowId ? { flowId } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
+      } catch (err) {
+        console.warn("[IvrFlowService] DB getAuditEvents failed:", err);
+      }
+    }
+    return [];
+  }
+
   private mapDbRecordToFlow(r: {
     id: string;
     hospitalId: string;
@@ -704,6 +1026,13 @@ export class IvrFlowService {
     deploymentStatus: string;
     isDefault: boolean;
     currentVersion: number;
+    category?: string;
+    direction?: string;
+    executionPriority?: number;
+    triggerConditions?: unknown;
+    isEnabled?: boolean;
+    isTemplate?: boolean;
+    templateCategory?: string | null;
     nodesJson: unknown;
     edgesJson: unknown;
     variablesJson: unknown;
@@ -724,6 +1053,13 @@ export class IvrFlowService {
       deploymentStatus: r.deploymentStatus as IvrFlowData["deploymentStatus"],
       isDefault: r.isDefault,
       currentVersion: r.currentVersion,
+      category: (r.category as FlowCategory) || "INBOUND_RECEPTION",
+      direction: (r.direction as "INBOUND" | "OUTBOUND") || "INBOUND",
+      executionPriority: r.executionPriority ?? 0,
+      triggerConditions: (r.triggerConditions as Record<string, unknown>) || undefined,
+      isEnabled: r.isEnabled ?? true,
+      isTemplate: r.isTemplate ?? false,
+      templateCategory: r.templateCategory || undefined,
       nodes: (r.nodesJson as unknown as IvrFlowData["nodes"]) || [],
       edges: (r.edgesJson as unknown as IvrFlowData["edges"]) || [],
       variables: (r.variablesJson as unknown as Record<string, unknown>) || {},
