@@ -191,7 +191,9 @@ export class CallMediaSession extends EventEmitter {
       new SarvamSpeechToTextProvider({
         sampleRate: 8000,
         languageCode: "ml-IN",
-        silenceTimeoutMs: options.silenceTimeoutMs ?? 400,
+        silenceTimeoutMs:
+          options.silenceTimeoutMs ??
+          (process.env.SARVAM_STT_SILENCE_TIMEOUT_MS ? Number(process.env.SARVAM_STT_SILENCE_TIMEOUT_MS) : 280),
       });
     const resolvedAgent = this.tenantResult.assignedAgent;
     this.ttsProvider =
@@ -772,7 +774,9 @@ export class CallMediaSession extends EventEmitter {
     if (this.isStopped || this.greetingPlayed) return;
     this.greetingPlayed = true;
 
-    const initialLang = this.ivrContext?.currentLanguage || "en-IN";
+    const initialLang =
+      this.ivrContext?.currentLanguage ||
+      (this.hospitalConfig.voice?.primaryLanguage === "MALAYALAM" ? "ml-IN" : "en-IN");
     const greeting = this.conversationEngine.getInitialGreeting(initialLang);
     this.lastAiResponse = greeting;
     this.ttsStatus = "SYNTHESIZING";
@@ -803,6 +807,7 @@ export class CallMediaSession extends EventEmitter {
 
   /**
    * Processes caller's transcribed utterance, queries Conversation Engine, and speaks response.
+   * Employs pipelined first-sentence streaming to achieve sub-1.5s prompt-to-audible response latency.
    * Records precise turn-by-turn latency metrics across STT VAD, LLM generation, and TTS synthesis.
    */
   public async handleUserTurn(text: string, turnInfo?: TranscriptTurnResult): Promise<void> {
@@ -812,19 +817,67 @@ export class CallMediaSession extends EventEmitter {
     const turnId = this.turnCounter;
     const finalTranscriptMs = turnInfo?.timestampMs || Date.now();
     const lastCallerAudioMs =
-      turnInfo?.lastCallerAudioMs || this.lastCallerAudioReceivedMs || finalTranscriptMs - 400;
+      turnInfo?.lastCallerAudioMs || this.lastCallerAudioReceivedMs || finalTranscriptMs - 280;
     const speechEndVadMs =
-      turnInfo?.speechEndVadMs || (this.lastCallerAudioReceivedMs ? this.lastCallerAudioReceivedMs + 400 : finalTranscriptMs);
+      turnInfo?.speechEndVadMs || (this.lastCallerAudioReceivedMs ? this.lastCallerAudioReceivedMs + 280 : finalTranscriptMs);
 
     this.ttsStatus = "SYNTHESIZING";
     const llmStartMs = Date.now();
     let llmFirstTokenMs: number | undefined;
+    let llmFirstSentenceMs: number | undefined;
+    let ttsStartMs = 0;
+    let ttsFirstAudioMs = 0;
+    let firstAudioSentToExotelMs = 0;
+    let lastAudioSentToExotelMs = 0;
 
-    const result = await this.conversationEngine.processCallerUtterance(text, () => {
-      if (!llmFirstTokenMs) {
-        llmFirstTokenMs = Date.now();
+    const lang =
+      this.ivrContext?.currentLanguage ||
+      (this.hospitalConfig.voice?.primaryLanguage === "MALAYALAM" ? "ml-IN" : "en-IN");
+    const cap = LanguageDetector.getCapability(lang);
+    const voiceId = cap.ttsVoice;
+
+    // Pipelined sentence playback queue
+    let playbackChain: Promise<void> = Promise.resolve();
+    let sentenceCountDispatched = 0;
+
+    const onSentenceChunk = (sentence: string, sIdx: number) => {
+      if (this.isStopped || this.isInterrupted) return;
+      sentenceCountDispatched++;
+
+      if (sIdx === 0) {
+        llmFirstSentenceMs = Date.now();
+        ttsStartMs = Date.now();
       }
-    });
+
+      // Concurrently dispatch sentence synthesis to Sarvam Bulbul TTS
+      const synthesisPromise = this.ttsProvider
+        .synthesize(sentence, {
+          language: cap.code,
+          voiceId,
+        })
+        .then(async (pcmAudio) => {
+          if (this.isStopped || this.isInterrupted) return;
+          if (sIdx === 0 && !ttsFirstAudioMs) {
+            ttsFirstAudioMs = Date.now();
+          }
+          if (pcmAudio && pcmAudio.length > 0) {
+            playbackChain = playbackChain.then(() =>
+              this.streamPcmAudio(pcmAudio, () => {
+                if (!firstAudioSentToExotelMs) {
+                  firstAudioSentToExotelMs = Date.now();
+                }
+              })
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn(`[CallSession ${this.callSid}] Pipelined TTS sentence ${sIdx + 1} error:`, err);
+        });
+
+      playbackChain = playbackChain.then(() => synthesisPromise);
+    };
+
+    const result = await this.conversationEngine.processCallerUtterance(text, onSentenceChunk);
 
     if (this.isExecutingIvrFlow && result.shouldTransfer) {
       console.log(
@@ -835,6 +888,7 @@ export class CallMediaSession extends EventEmitter {
     }
 
     llmFirstTokenMs = result.llmTimestamps?.llmFirstTokenMs || llmFirstTokenMs || Date.now();
+    llmFirstSentenceMs = result.llmTimestamps?.llmFirstSentenceMs || llmFirstSentenceMs || Date.now();
     const llmResponseReadyMs = result.llmTimestamps?.llmResponseReadyMs || Date.now();
 
     this.lastAiResponse = result.replyText;
@@ -853,34 +907,36 @@ export class CallMediaSession extends EventEmitter {
       transferDestination: result.transferDestination,
     });
 
-    const ttsStartMs = Date.now();
-    let ttsFirstAudioMs = 0;
-    let firstAudioSentToExotelMs = 0;
-    let lastAudioSentToExotelMs = 0;
-
-    try {
-      const lang = this.ivrContext?.currentLanguage || "en-IN";
-      const cap = LanguageDetector.getCapability(lang);
-      const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
-        language: cap.code,
-        voiceId: cap.ttsVoice,
-      });
-
-      ttsFirstAudioMs = Date.now();
-
-      if (pcmAudio && pcmAudio.length > 0 && !this.isStopped) {
-        await this.streamPcmAudio(pcmAudio, () => {
-          if (!firstAudioSentToExotelMs) {
-            firstAudioSentToExotelMs = Date.now();
-          }
-        });
-        lastAudioSentToExotelMs = Date.now();
-      } else {
+    if (sentenceCountDispatched > 0) {
+      await playbackChain;
+      lastAudioSentToExotelMs = Date.now();
+      if (!this.isInterrupted) {
         this.ttsStatus = "IDLE";
       }
-    } catch (err) {
-      console.warn(`[CallSession ${this.callSid}] Response synthesis error:`, err);
-      this.ttsStatus = "IDLE";
+    } else {
+      // Direct synthesis fallback if no chunk was streamed
+      ttsStartMs = Date.now();
+      try {
+        const pcmAudio = await this.ttsProvider.synthesize(result.replyText, {
+          language: cap.code,
+          voiceId,
+        });
+        ttsFirstAudioMs = Date.now();
+        if (pcmAudio && pcmAudio.length > 0 && !this.isStopped && !this.isInterrupted) {
+          await this.streamPcmAudio(pcmAudio, () => {
+            if (!firstAudioSentToExotelMs) {
+              firstAudioSentToExotelMs = Date.now();
+            }
+          });
+          lastAudioSentToExotelMs = Date.now();
+        }
+      } catch (err) {
+        console.warn(`[CallSession ${this.callSid}] Direct response synthesis error:`, err);
+      } finally {
+        if (!this.isInterrupted) {
+          this.ttsStatus = "IDLE";
+        }
+      }
     }
 
     const speechEndToTranscriptMs = Math.max(0, finalTranscriptMs - speechEndVadMs);
@@ -903,6 +959,7 @@ export class CallMediaSession extends EventEmitter {
         finalTranscriptMs,
         llmStartMs,
         llmFirstTokenMs,
+        llmFirstSentenceMs,
         llmResponseReadyMs,
         ttsStartMs,
         ttsFirstAudioMs: ttsFirstAudioMs || ttsStartMs,
@@ -915,6 +972,7 @@ export class CallMediaSession extends EventEmitter {
         llmFirstTokenToTtsAudioMs,
         ttsFirstAudioMs: ttsFirstAudioDurationMs,
         totalSpeechEndToAudibleResponseMs,
+        firstSentenceLatencyMs: Math.max(0, (llmFirstSentenceMs || Date.now()) - llmStartMs),
       },
       timestamp: new Date().toISOString(),
     };

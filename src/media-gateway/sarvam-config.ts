@@ -50,13 +50,13 @@ export function maskSecret(secret?: string, redactCompletely = true): string {
 
 export function getSarvamConfig(overrides?: Partial<SarvamConfig>): SarvamConfig {
   const apiKey =
-    overrides?.apiKey ||
-    process.env.SARVAM_API_KEY ||
-    "";
+    overrides?.apiKey !== undefined
+      ? overrides.apiKey
+      : process.env.SARVAM_API_KEY || "";
   const samvaadApiKey =
-    overrides?.samvaadApiKey ||
-    process.env.SARVAM_SAMVAAD_API_KEY ||
-    "";
+    overrides?.samvaadApiKey !== undefined
+      ? overrides.samvaadApiKey
+      : process.env.SARVAM_SAMVAAD_API_KEY || "";
   const orgId =
     overrides?.orgId ||
     process.env.SARVAM_ORG_ID ||

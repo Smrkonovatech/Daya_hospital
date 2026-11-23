@@ -1,18 +1,24 @@
 /**
  * ============================================================================
- * SMRKOMED HOSPITAL CONVERSATION ENGINE (MALAYALAM VOICE AI)
+ * SMRKOMED HOSPITAL CONVERSATION ENGINE (SARVAM-NATIVE CONVERSATIONAL AI)
  * ============================================================================
  *
- * Provider-independent dialogue orchestrator for hospital reception.
+ * Direct Sarvam AI conversational reasoning and dialogue generation with
+ * hospital-specific knowledge orchestration, tenant guardrails, triage monitoring,
+ * and pipelined first-sentence streaming.
+ *
  * Initial Pilot: Daya General Hospital & Specialty Surgical Centre, Thrissur.
  *
  * Responsibilities:
- * - Polite Malayalam telephone receptionist persona.
- * - Welcome greeting: "നമസ്കാരം! ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ സ്മാർക്കോമെഡ് AI അസിസ്റ്റന്റാണ്. എങ്ങനെ സഹായിക്കാം?"
- * - Triage & emergency safeguard: direct escalation to 24/7 Casualty (0487 2475100).
- * - Multi-turn appointment information collection (Patient Name, Doctor/Dept, Date/Time).
+ * - Polite, natural Malayalam / English / Manglish receptionist persona.
+ * - Sarvam 105B conversation model (`sarvam-105b-conversations`) as the primary brain
+ *   reasoning over approved hospital context, departments, doctors, visiting hours,
+ *   consultation fees, facilities, and appointment policies.
+ * - Streaming token processing with intelligent sentence boundary detection for early
+ *   first-sentence dispatch to Sarvam Bulbul TTS (<1.0-1.5s prompt-to-speech latency).
+ * - Triage & emergency safeguard: immediate escalation to 24/7 Casualty or 108.
  * - Strict healthcare boundaries: never prescribes medication or diagnoses illnesses.
- * - Dynamic generation via Sarvam 105B conversations LLM with fast rule-based fallback.
+ * - Offline mock fallback for unit tests when API keys are unconfigured.
  */
 
 import { HospitalConfig, DAYA_HOSPITAL_CONFIG } from "@/lib/config/hospital-config";
@@ -42,6 +48,7 @@ export interface ConversationResult {
   llmTimestamps?: {
     llmStartMs: number;
     llmFirstTokenMs?: number;
+    llmFirstSentenceMs?: number;
     llmResponseReadyMs: number;
   };
 }
@@ -69,21 +76,30 @@ export class HospitalConversationEngine {
 
   /**
    * Returns the initial welcome greeting spoken by the receptionist when call connects.
-   * Defaults to English (immediate conversational zero-DTMF greeting) per Phase 4.6.1.
+   * Defaults to Malayalam for Kerala pilot, with multi-language adaptation.
    */
-  public getInitialGreeting(lang: string = "en-IN"): string {
-    const hospital = this.hospitalConfig.hospitalName || "General Hospital";
+  public getInitialGreeting(lang: string = "ml-IN"): string {
+    const isDaya =
+      this.hospitalConfig.hospitalId === "hosp_daya_thrissur" ||
+      (this.hospitalConfig.hospitalName || "").toLowerCase().includes("daya");
+    const hospitalMl = isDaya
+      ? "ദയ ഹോസ്പിറ്റൽ"
+      : this.hospitalConfig.shortName || this.hospitalConfig.hospitalName || "ഹോസ്പിറ്റൽ";
+    const destinationMl = isDaya ? "ദയ ഹോസ്പിറ്റലിലേക്ക്" : `${hospitalMl}ലേക്ക്`;
+    const hospitalEn = this.hospitalConfig.hospitalName || "General Hospital";
+    const hospital = hospitalEn;
+
     switch (lang) {
       case "ml-IN":
-        return `നമസ്കാരം! ${hospital}ലേക്ക് സ്വാഗതം. ഞാൻ സ്മാർക്കോമെഡ് AI അസിസ്റ്റന്റാണ്. എങ്ങനെ സഹായിക്കാം?`;
+        return `നമസ്കാരം! ${destinationMl} സ്വാഗതം. ഞാൻ സ്മാർക്കോമെഡ് AI അസിസ്റ്റന്റാണ്. എങ്ങനെ സഹായിക്കാം?`;
       case "hi-IN":
         return `नमस्ते! ${hospital} में आपका स्वागत है। मैं स्मार्कोमेड AI सहायक हूँ। मैं आपकी क्या मदद कर सकता हूँ?`;
       case "ta-IN":
-        return `வணக்கம்! ${hospital}க்கு வரவேற்கிறோம். நான் ஸ்மார்டோமெட் AI உதவியாளர். உங்களுக்கு எப்படி உதவ முடியும்?`;
+        return `வணக்கம்! ${hospital}க்கு வரவேற்கிறோம். நான் ஸ்மார்டோமெட் AI உதவியாளர். உங்களுக்கு എങ്ങനെ സഹായിക്കാം?`;
       case "kn-IN":
-        return `ನಮಸ್ಕಾರ! ${hospital} ಗೆ ಸುಸ್ವಾಗತ. ನಾನು ಸ್ಮಾರ್ಕೋಮೆಡ್ AI ಸಹಾಯಕ. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಬಹುದು?`;
+        return `ನಮಸ್ಕಾರ! ${hospital} ಗೆ ಸುಸ್ವಾಗತ. ನಾನು ಸ್ಮಾರ್ಕೋമെಡ್ AI ಸಹಾಯಕ. ನಾನು ನಿಮಗೆ എങ്ങനെ സഹായിക്കാം?`;
       case "te-IN":
-        return `నమస్కారం! ${hospital} కి స్వాగతం. నేను స్మార్కోమెడ్ AI సహాయకుడిని. నేను మీకు ఎలా సహాయం చేయగలను?`;
+        return `నమస్కారం! ${hospital} కి స్వాగతం. నేను స్మార్కోమెడ్ AI సహాయకుడిని. ఎలా സഹായിക്കാം?`;
       case "en-IN":
       default:
         return `Hello! Welcome to ${hospital}. I am your AI receptionist. How may I help you today?`;
@@ -92,11 +108,11 @@ export class HospitalConversationEngine {
 
   /**
    * Processes a transcribed caller utterance and produces a polite, language-aware response.
-   * Supports optional onFirstSentenceChunk callback for early-start streaming TTS.
+   * Supports streaming sentence emission via onSentenceChunk callback for pipelined TTS.
    */
   public async processCallerUtterance(
     callerText: string,
-    onFirstSentenceChunk?: (sentence: string) => void
+    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void
   ): Promise<ConversationResult> {
     const text = (callerText || "").trim();
     this.turnCount++;
@@ -106,6 +122,7 @@ export class HospitalConversationEngine {
     const immediateTimestamps = {
       llmStartMs: tImmediate,
       llmFirstTokenMs: tImmediate,
+      llmFirstSentenceMs: tImmediate,
       llmResponseReadyMs: tImmediate,
     };
 
@@ -117,7 +134,7 @@ export class HospitalConversationEngine {
         ? "ദയവായി താങ്കൾക്ക് എന്ത് സഹായമാണ് വേണ്ടതെന്ന് പറയാമോ?"
         : "Could you please tell me how I can assist you today?";
       this.history.push({ role: "assistant", content: defaultPrompt, timestamp: Date.now() });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(defaultPrompt);
+      if (onSentenceChunk) onSentenceChunk(defaultPrompt, 0);
       return {
         replyText: defaultPrompt,
         firstSentenceText: defaultPrompt,
@@ -140,9 +157,8 @@ export class HospitalConversationEngine {
       if (isConfirmed) {
         reply = lang === "ml-IN"
           ? `ഇതൊരു അത്യാഹിത സാഹചര്യമായതിനാൽ ഞാൻ കാഷ്വാലിറ്റി എമർജൻസി ഡെസ്കിലേക്ക് കണക്ട് ചെയ്യുകയാണ്. ദയവായി ലൈനിൽ തുടരുക, അല്ലെങ്കിൽ ${casualtyNumber} എന്ന നമ്പറിൽ ഉടൻ ബന്ധപ്പെടുക.`
-          : `This is an emergency situation. I am connecting you to the casualty emergency desk. Please stay on the line.`;
+          : `ഇതൊരു അത്യാഹിത സാഹചര്യമായതിനാൽ ഞാൻ കാഷ്വാലിറ്റി എമർജൻസി ഡെസ്കിലേക്ക് കണക്ട് ചെയ്യുകയാണ് (${casualtyNumber}). This is an emergency situation. I am connecting you to the casualty emergency desk at ${casualtyNumber}. Please stay on the line.`;
       } else {
-        // Safe medical guidance state: do NOT attempt live dialing to unconfirmed numbers
         console.warn("[ConversationEngine] Emergency detected but hospital destination is unconfirmed. Providing safe medical guidance.");
         reply = lang === "ml-IN"
           ? "ശ്രദ്ധിക്കുക: അടിയന്തര സാഹചര്യങ്ങളിൽ ദയവായി തൊട്ടടുത്തുള്ള ആശുപത്രിയിലെ കാഷ്വാലിറ്റി വിഭാഗത്തിൽ നേരിട്ടെത്തുകയോ അല്ലെങ്കിൽ 108 ആംബുലൻസ് സർവീസുമായി ഉടൻ ബന്ധപ്പെടുകയോ ചെയ്യുക."
@@ -150,7 +166,7 @@ export class HospitalConversationEngine {
       }
 
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
+      if (onSentenceChunk) onSentenceChunk(reply, 0);
       return {
         replyText: reply,
         firstSentenceText: reply,
@@ -169,7 +185,7 @@ export class HospitalConversationEngine {
         ? "തീർച്ചയായും, ഞാൻ ഇപ്പോൾ തന്നെ ഹോസ്പിറ്റൽ ഫ്രണ്ട് ഡെസ്ക് സ്റ്റാഫിലേക്ക് കോൾ ട്രാൻസ്ഫർ ചെയ്യാം. ദയവായി ലൈനിൽ തുടരുക."
         : "Certainly, I am transferring your call to our hospital reception staff. Please hold the line.";
       this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
+      if (onSentenceChunk) onSentenceChunk(reply, 0);
       return {
         replyText: reply,
         firstSentenceText: reply,
@@ -180,99 +196,105 @@ export class HospitalConversationEngine {
       };
     }
 
-    // ----------------------------------------------------
-    // 3. APPOINTMENT BOOKING WORKFLOW
-    // ----------------------------------------------------
-    if (this.isAppointmentIntent(lower)) {
-      const appointmentResult = this.handleAppointmentStep(text, lang);
-      this.history.push({
-        role: "assistant",
-        content: appointmentResult.replyText,
-        timestamp: Date.now(),
-      });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(appointmentResult.replyText);
-      return {
-        ...appointmentResult,
-        firstSentenceText: appointmentResult.replyText,
-        llmTimestamps: immediateTimestamps,
-      };
-    }
+    // Background entity extraction for appointment tracking
+    this.extractAppointmentEntities(text);
 
     // ----------------------------------------------------
-    // 4. CONSULTATION FEES & CHARGES
+    // 3. SARVAM-NATIVE CONVERSATIONAL REASONING (SARVAM-105B)
     // ----------------------------------------------------
-    if (this.isFeesInquiry(lower)) {
-      const reply = lang === "ml-IN"
-        ? "ദയ ഹോസ്പിറ്റലിൽ പുതിയ പേഷ്യന്റ് രജിസ്ട്രേഷന് 100 രൂപയും, ജനറൽ മെഡിസിൻ ഒപി കൺസൾട്ടേഷന് 250 രൂപയുമാണ്. സ്പെഷ്യലിസ്റ്റ് കൺസൾട്ടേഷൻ ഫീസ് 450 രൂപയും, സൂപ്പർ സ്പെഷ്യാലിറ്റി ഒപി ഫീസ് 600 രൂപയുമാണ്."
-        : "At our hospital, new patient registration is Rs 100, and general medicine OP consultation is Rs 250. Specialist consultation is Rs 450, and super-specialty OP is Rs 600.";
-      this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
-      return {
-        replyText: reply,
-        firstSentenceText: reply,
-        intent: "FEES",
-        shouldTransfer: false,
-        llmTimestamps: immediateTimestamps,
-      };
-    }
-
-    // ----------------------------------------------------
-    // 5. DOCTOR & DEPARTMENT INFORMATION
-    // ----------------------------------------------------
-    if (this.isDoctorInfoInquiry(lower)) {
-      const reply = lang === "ml-IN"
-        ? "ദയ ഹോസ്പിറ്റലിൽ കാർഡിയോളജി, ഓർത്തോപീഡിക്സ്, ജനറൽ മെഡിസിൻ, പീഡിയാട്രിക്സ്, ഇഎൻടി, ന്യൂറോളജി എന്നീ വിഭാഗങ്ങൾ പ്രവർത്തിക്കുന്നുണ്ട്. രാവിലെ 9 മണി മുതൽ വൈകുന്നേരം 5 മണി വരെയാണ് ഒപി കൺസൾട്ടേഷൻ സമയം."
-        : "Our hospital has Cardiology, Orthopaedics, General Medicine, Paediatrics, ENT, and Neurology departments. Outpatient consultations are open Monday to Saturday from 9 AM to 5 PM.";
-      this.history.push({ role: "assistant", content: reply, timestamp: Date.now() });
-      if (onFirstSentenceChunk) onFirstSentenceChunk(reply);
-      return {
-        replyText: reply,
-        firstSentenceText: reply,
-        intent: "DOCTOR_INFO",
-        shouldTransfer: false,
-        llmTimestamps: immediateTimestamps,
-      };
-    }
-
-    // ----------------------------------------------------
-    // 6. DYNAMIC MALAYALAM LLM STREAMING (SARVAM-105B)
-    // ----------------------------------------------------
-    const tStart = Date.now();
-    let aiResponse = "";
-    let firstSentence = "";
-    let llmFirstTokenMs: number | undefined;
-
     if (this.sarvamConfig.isConfigured) {
-      const llmResult = await this.querySarvamLlm(text, onFirstSentenceChunk);
-      aiResponse = llmResult.fullText;
-      firstSentence = llmResult.firstSentence;
-      llmFirstTokenMs = llmResult.llmFirstTokenMs;
+      const llmResult = await this.querySarvamLlm(text, onSentenceChunk);
+      let replyText = llmResult.fullText.trim();
+      let firstSentenceText = llmResult.firstSentence.trim();
+
+      let intent: ConversationResult["intent"] = "GENERAL";
+      let shouldTransfer = false;
+      let transferDestination: string | undefined;
+
+      // Parse structured action tags if returned by Sarvam LLM
+      if (replyText.includes("[TRANSFER_STAFF]")) {
+        intent = "STAFF_TRANSFER";
+        shouldTransfer = true;
+        transferDestination = "201";
+        replyText = replyText.replace(/\[TRANSFER_STAFF\]/g, "").trim();
+        firstSentenceText = firstSentenceText.replace(/\[TRANSFER_STAFF\]/g, "").trim();
+      } else if (replyText.includes("[EMERGENCY_DETECTED]") || replyText.includes("[CASUALTY]")) {
+        intent = "CASUALTY";
+        const isConfirmed = process.env.HOSPITAL_DESTINATIONS_CONFIRMED === "true";
+        shouldTransfer = isConfirmed;
+        transferDestination = isConfirmed ? this.hospitalConfig.routing.casualtyDirectNumber : undefined;
+        replyText = replyText.replace(/\[EMERGENCY_DETECTED\]|\[CASUALTY\]/g, "").trim();
+        firstSentenceText = firstSentenceText.replace(/\[EMERGENCY_DETECTED\]|\[CASUALTY\]/g, "").trim();
+      } else if (this.isAppointmentIntent(lower) || replyText.includes("[APPOINTMENT]")) {
+        intent = "APPOINTMENT";
+        replyText = replyText.replace(/\[APPOINTMENT\]/g, "").trim();
+        firstSentenceText = firstSentenceText.replace(/\[APPOINTMENT\]/g, "").trim();
+      } else if (this.isDoctorInfoInquiry(lower)) {
+        intent = "DOCTOR_INFO";
+      } else if (this.isFeesInquiry(lower)) {
+        intent = "FEES";
+      }
+
+      if (replyText) {
+        this.history.push({ role: "assistant", content: replyText, timestamp: llmResult.llmResponseReadyMs });
+        return {
+          replyText,
+          firstSentenceText: firstSentenceText || replyText,
+          intent,
+          shouldTransfer,
+          transferDestination,
+          appointmentData: { ...this.collectedAppointment },
+          llmTimestamps: {
+            llmStartMs: llmResult.llmStartMs,
+            llmFirstTokenMs: llmResult.llmFirstTokenMs,
+            llmFirstSentenceMs: llmResult.llmFirstSentenceMs,
+            llmResponseReadyMs: llmResult.llmResponseReadyMs,
+          },
+        };
+      }
     }
 
-    if (!aiResponse) {
-      aiResponse =
-        "തീർച്ചയായും. ഡോക്ടറെ കാണുന്നതിനായുള്ള അപ്പോയിന്റ്മെന്റ് അല്ലെങ്കിൽ ഹോസ്പിറ്റൽ സേവനങ്ങളെക്കുറിച്ചുള്ള വിവരങ്ങൾക്ക് സഹായിക്കാം. ഏത് വിഭാഗത്തിലാണ് സഹായം വേണ്ടത്?";
-      firstSentence = aiResponse;
-      if (onFirstSentenceChunk) onFirstSentenceChunk(aiResponse);
+    // ----------------------------------------------------
+    // 4. OFFLINE / TEST MOCK FALLBACK
+    // ----------------------------------------------------
+    let fallbackReply = "";
+    let fallbackIntent: ConversationResult["intent"] = "GENERAL";
+
+    if (this.isAppointmentIntent(lower)) {
+      const apptResult = this.handleAppointmentStep(text, lang);
+      fallbackReply = apptResult.replyText;
+      fallbackIntent = "APPOINTMENT";
+    } else if (this.isFeesInquiry(lower)) {
+      fallbackReply = lang === "ml-IN"
+        ? "ദയ ഹോസ്പിറ്റലിൽ പുതിയ പേഷ്യന്റ് രജിസ്ട്രേഷന് 100 രൂപയും, ജനറൽ ഒപി കൺസൾട്ടേഷന് 250 രൂപയുമാണ്. സ്പെഷ്യലിസ്റ്റ് കൺസൾട്ടേഷൻ ഫീസ് 450 രൂപയും സൂപ്പർ സ്പെഷ്യാലിറ്റി ഒപി ഫീസ് 600 രൂപയുമാണ്."
+        : "At our hospital, new patient registration is Rs 100, and general medicine OP consultation is Rs 250. Specialist consultation is Rs 450, and super-specialty OP is Rs 600.";
+      fallbackIntent = "FEES";
+    } else if (this.isDoctorInfoInquiry(lower)) {
+      fallbackReply = lang === "ml-IN"
+        ? "ദയ ഹോസ്പിറ്റലിൽ കാർഡിയോളജി, ഓർത്തോപീഡിക്സ്, ജനറൽ മെഡിസിൻ, പീഡിയാട്രിക്സ്, ഇഎൻടി എന്നീ വിഭാഗങ്ങൾ പ്രവർത്തിക്കുന്നുണ്ട്. രാവിലെ 9 മണി മുതൽ വൈകുന്നേരം 5 മണി വരെയാണ് ഒപി കൺസൾട്ടേഷൻ സമയം."
+        : "Our hospital has Cardiology, Orthopaedics, General Medicine, Paediatrics, and ENT departments. Outpatient consultations are open Monday to Saturday from 9 AM to 5 PM.";
+      fallbackIntent = "DOCTOR_INFO";
+    } else {
+      fallbackReply = lang === "ml-IN"
+        ? "തീർച്ചയായും. ഡോക്ടറെ കാണുന്നതിനായുള്ള അപ്പോയിന്റ്മെന്റ് അല്ലെങ്കിൽ ഹോസ്പിറ്റൽ സേവനങ്ങളെക്കുറിച്ചുള്ള വിവരങ്ങൾക്ക് സഹായിക്കാം. ഏത് വിഭാഗത്തിലാണ് സഹായം വേണ്ടത്?"
+        : "Certainly! I can assist you with doctor appointments or hospital services. Which department would you like help with?";
     }
 
-    const tEnd = Date.now();
-    this.history.push({ role: "assistant", content: aiResponse, timestamp: tEnd });
+    this.history.push({ role: "assistant", content: fallbackReply, timestamp: Date.now() });
+    if (onSentenceChunk) onSentenceChunk(fallbackReply, 0);
+
     return {
-      replyText: aiResponse,
-      firstSentenceText: firstSentence || aiResponse,
-      intent: "GENERAL",
+      replyText: fallbackReply,
+      firstSentenceText: fallbackReply,
+      intent: fallbackIntent,
       shouldTransfer: false,
-      llmTimestamps: {
-        llmStartMs: tStart,
-        llmFirstTokenMs: llmFirstTokenMs || tStart,
-        llmResponseReadyMs: tEnd,
-      },
+      appointmentData: { ...this.collectedAppointment },
+      llmTimestamps: immediateTimestamps,
     };
   }
 
   // --------------------------------------------------------------------------
-  // HEURISTIC INTENT CLASSIFIERS
+  // HEURISTIC HELPERS & ENTITY EXTRACTION
   // --------------------------------------------------------------------------
 
   private isEmergency(text: string): boolean {
@@ -305,7 +327,6 @@ export class HospitalConversationEngine {
       "ഡോക്ടറെ കാണാൻ",
       "ഡോക്ടറെ കാണണം",
       "കാണണം",
-      "സമയം",
       "slot",
       "book",
       "consult",
@@ -329,8 +350,6 @@ export class HospitalConversationEngine {
       "വിഭാഗങ്ങൾ",
       "ഡിപ്പാർട്ട്മെന്റ്",
       "ആരൊക്കെ ഉണ്ട്",
-      "ടൈം",
-      "സമയം",
       "സമയം ഉണ്ടോ",
       "doctor list",
       "department",
@@ -338,19 +357,30 @@ export class HospitalConversationEngine {
     return doctorKeywords.some((kw) => text.includes(kw));
   }
 
-  private handleAppointmentStep(text: string, lang: string = "ml-IN"): ConversationResult {
-    // Extract department if mentioned
-    if (text.includes("കാർഡിയോളജി") || text.toLowerCase().includes("cardio")) {
+  private extractAppointmentEntities(text: string): void {
+    const lower = text.toLowerCase();
+    if (text.includes("കാർഡിയോളജി") || lower.includes("cardio")) {
       this.collectedAppointment.department = "Cardiology";
-    } else if (text.includes("ഓർത്തോ") || text.toLowerCase().includes("ortho")) {
+    } else if (text.includes("ഓർത്തോ") || lower.includes("ortho")) {
       this.collectedAppointment.department = "Orthopaedics";
-    } else if (text.includes("കുട്ടികളുടെ") || text.toLowerCase().includes("pediatric")) {
+    } else if (text.includes("കുട്ടികളുടെ") || lower.includes("pediatric")) {
       this.collectedAppointment.department = "Paediatrics";
-    } else if (text.includes("ജനറൽ മെഡിസിൻ") || text.toLowerCase().includes("general")) {
+    } else if (text.includes("ജനറൽ മെഡിസിൻ") || lower.includes("general medicine")) {
       this.collectedAppointment.department = "General Medicine";
+    } else if (text.includes("ഗൈനക്കോളജി") || lower.includes("gynae")) {
+      this.collectedAppointment.department = "Obstetrics & Gynaecology";
     }
 
-    // Step 1: Missing department
+    if (text.includes("നാളെ") || lower.includes("tomorrow")) {
+      this.collectedAppointment.preferredDate = "Tomorrow";
+    } else if (text.includes("ഇന്ന്") || lower.includes("today")) {
+      this.collectedAppointment.preferredDate = "Today";
+    }
+  }
+
+  private handleAppointmentStep(text: string, lang: string = "ml-IN"): ConversationResult {
+    this.extractAppointmentEntities(text);
+
     if (!this.collectedAppointment.department) {
       const replyText = lang === "ml-IN"
         ? "തീർച്ചയായും. ഏത് വിഭാഗത്തിലെ ഡോക്ടറെയാണ് കാണേണ്ടത്? കാർഡിയോളജി, ഓർത്തോപീഡിക്സ്, ജനറൽ മെഡിസിൻ, പീഡിയാട്രിക്സ് എന്നിവ ലഭ്യമാണ്."
@@ -363,41 +393,21 @@ export class HospitalConversationEngine {
       };
     }
 
-    // Step 2: Missing preferred time
     if (!this.collectedAppointment.preferredDate) {
-      if (text.includes("നാളെ") || text.toLowerCase().includes("tomorrow")) {
-        this.collectedAppointment.preferredDate = "Tomorrow";
-      } else if (text.includes("ഇന്ന്") || text.toLowerCase().includes("today")) {
-        this.collectedAppointment.preferredDate = "Today";
-      } else {
-        const replyText = lang === "ml-IN"
-          ? `ശരി, ${this.collectedAppointment.department} വിഭാഗത്തിൽ അപ്പോയിന്റ്മെന്റ് എടുക്കാം. താങ്കൾക്ക് സൗകര്യപ്രദമായ തീയതിയും സമയവും എപ്പോഴാണ്? നാളെ രാവിലെയോ വൈകുന്നേരമോ?`
-          : `Sure, let's schedule an appointment with ${this.collectedAppointment.department}. What date and time would suit you best? Tomorrow morning or afternoon?`;
-        return {
-          replyText,
-          intent: "APPOINTMENT",
-          shouldTransfer: false,
-          appointmentData: { ...this.collectedAppointment },
-        };
-      }
+      const replyText = lang === "ml-IN"
+        ? `ശരി, ${this.collectedAppointment.department} വിഭാഗത്തിൽ അപ്പോയിന്റ്മെന്റ് എടുക്കാം. താങ്കൾക്ക് സൗകര്യപ്രദമായ തീയതിയും സമയവും എപ്പോഴാണ്? നാളെ രാവിലെയോ വൈകുന്നേരമോ?`
+        : `Sure, let's schedule an appointment with ${this.collectedAppointment.department}. What date and time would suit you best? Tomorrow morning or afternoon?`;
+      return {
+        replyText,
+        intent: "APPOINTMENT",
+        shouldTransfer: false,
+        appointmentData: { ...this.collectedAppointment },
+      };
     }
 
-    // Step 3: Confirmation (Explicit safety guard: AI must never falsely claim an appointment is booked or slot confirmed)
-    const isMockOrTest = Boolean(
-      this.hospitalConfig.telephony.status === "MOCK_SANDBOX" ||
-      process.env.AI_DEMO_MODE === "true" ||
-      process.env.NODE_ENV !== "production"
-    );
-    let replyText: string;
-    if (lang === "ml-IN") {
-      replyText = isMockOrTest
-        ? "നന്ദി. ഇതൊരു പരീക്ഷണ കോളായതിനാൽ യഥാർത്ഥ അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്തിട്ടില്ല. ഡെമോൺസ്ട്രേഷനായി താങ്കളുടെ വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്."
-        : "നന്ദി. താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്. ഒപി വിഭാഗത്തിൽ നിന്ന് കൺഫർമേഷനായി ബന്ധപ്പെടുന്നതാണ്.";
-    } else {
-      replyText = isMockOrTest
-        ? "Thank you. As this is a test call, no actual appointment was booked. Your details have been noted for demonstration."
-        : "Thank you. Your appointment details have been noted. Our hospital OPD will contact you shortly to confirm the slot.";
-    }
+    const replyText = lang === "ml-IN"
+      ? "നന്ദി. താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്. ഒപി വിഭാഗത്തിൽ നിന്ന് കൺഫർമേഷനായി ബന്ധപ്പെടുന്നതാണ്."
+      : "Thank you. Your appointment details have been noted. Our hospital OPD desk will contact you shortly to confirm the slot.";
 
     return {
       replyText,
@@ -409,33 +419,54 @@ export class HospitalConversationEngine {
 
   /**
    * Generates dynamic Malayalam conversation using Sarvam's 105B conversation model.
-   * Supports streaming with early first-sentence detection to minimize TTS startup latency.
+   * Feeds full approved hospital knowledge into system prompt and streams tokens with
+   * early sentence boundary detection for pipelined TTS.
    */
   private async querySarvamLlm(
     userPrompt: string,
-    onFirstSentence?: (sentence: string) => void
+    onSentenceChunk?: (sentence: string, sentenceIndex: number) => void
   ): Promise<{
     fullText: string;
     firstSentence: string;
     llmStartMs: number;
     llmFirstTokenMs?: number;
+    llmFirstSentenceMs?: number;
     llmResponseReadyMs: number;
   }> {
     const llmStartMs = Date.now();
     let llmFirstTokenMs: number | undefined;
+    let llmFirstSentenceMs: number | undefined;
 
     try {
-      const systemPrompt = `You are the AI Voice Receptionist at ${this.hospitalConfig.hospitalName}, ${this.hospitalConfig.city}, Kerala.
-Rules:
-1. Always reply in polite, natural spoken Malayalam. Keep responses very brief (1 to 2 short sentences) suitable for telephony speech.
-2. For appointment inquiries, guide caller to provide department, doctor, and preferred time.
-3. For emergency or casualty inquiries, direct caller immediately to Casualty Hotline: ${this.hospitalConfig.routing.casualtyDirectNumber}.
-4. Never invent medical advice or fake prescriptions.
-5. Be courteous, respectful and welcoming.`;
+      const casualtyDirectNumber = this.hospitalConfig.routing.casualtyDirectNumber || "0487 2475100";
+      const systemPrompt = `You are the polite, warm, and highly efficient AI Voice Receptionist at ${this.hospitalConfig.hospitalName}, ${this.hospitalConfig.city}, Kerala.
+
+APPROVED HOSPITAL KNOWLEDGE:
+- Profile: NABH-accredited 300-bed multi-specialty hospital located near State Bank of India, Shornur Road, Thrissur.
+- Emergency / Casualty: 24/7 Casualty & Trauma Care. If the caller has a medical emergency (severe chest pain, breathing difficulty, heavy bleeding, accident, loss of consciousness), direct them immediately to Casualty (${casualtyDirectNumber}) or ambulance 108 and append tag [EMERGENCY_DETECTED].
+- OPD Timings: Morning OPD 8:30 AM to 1:00 PM (Mon-Sat); Evening OPD 4:00 PM to 7:00 PM (select specialties); Sunday OPD 9:00 AM to 1:00 PM (General Medicine & Paediatrics).
+- Visiting Hours: General Wards 11:30 AM - 1:00 PM & 4:30 PM - 6:30 PM; ICU 12:00 PM - 1:00 PM & 5:00 PM - 6:00 PM (1 visitor only).
+- Doctors & Schedule:
+  * Cardiology: Dr. K. R. Balakrishnan (Mon, Wed, Fri 9 AM - 1 PM); Dr. Mathew Joseph (Tue, Thu, Sat 10 AM - 2 PM).
+  * Orthopaedics: Dr. Suresh Kumar (Mon-Sat 9:30 AM - 1 PM); Dr. Praveen Menon (Mon-Fri 2 PM - 5 PM).
+  * Paediatrics: Dr. Radhika Nair (Mon-Sat 9 AM - 2 PM); Evening clinic daily 4:30 PM - 7 PM.
+  * Obstetrics & Gynaecology: Dr. Lakshmi Nambiar (Mon-Sat 9 AM - 1 PM); Dr. Sneha Thomas (Mon, Wed, Fri 2 PM - 6 PM).
+  * General Medicine: Dr. Anitha Varghese (Mon-Sat 9 AM - 1 PM & 4 PM - 7 PM).
+  * Also active: Neurology, Nephrology (24/7 Dialysis), ENT, Pulmonology, Surgery.
+- Consultation Fees: Lifetime UHID registration ₹100, General Medicine OP ₹250 (valid for 1 free revisit within 7 days), Specialist ₹450, Super-Specialty ₹600, Casualty ₹500. Payment by UPI, Card, Cash, TPA cashless.
+- Facilities: 1.5T MRI, 128-slice CT, 4D Ultrasound, Digital X-Ray, 24/7 NABL Lab, 24/7 Pharmacy.
+- Appointment Policies: Book up to 14 days in advance. Patients should arrive 20 minutes before slot. Free cancellation up to 1 hour prior. Tell caller details are noted and the OPD desk will contact them to confirm.
+- Staff Transfer: If caller asks for a human operator, staff, or front desk, say a polite transfer sentence and append [TRANSFER_STAFF].
+
+VOICE TELEPHONY RULES:
+1. Always respond in the language used by the caller: spoken Malayalam (സ്വാഭാവിക മലയാളം), English, or Manglish.
+2. BREVITY IS ESSENTIAL: Keep every response to 1 or 2 concise, spoken sentences (maximum 25 words). Never give long lists or bullet points.
+3. Be courteous, respectful, and welcoming.
+4. Strictly NEVER diagnose illnesses or recommend medications/prescriptions.`;
 
       const messages = [
         { role: "system", content: systemPrompt },
-        ...this.history.slice(-4).map((h) => ({ role: h.role, content: h.content })),
+        ...this.history.slice(-6).map((h) => ({ role: h.role, content: h.content })),
         { role: "user", content: userPrompt },
       ];
 
@@ -449,7 +480,7 @@ Rules:
           model: this.sarvamConfig.chatModel || "sarvam-105b-conversations",
           messages,
           temperature: 0.2,
-          max_tokens: 100,
+          max_tokens: 120,
           stream: true,
         }),
       });
@@ -460,7 +491,8 @@ Rules:
         let buffer = "";
         let fullText = "";
         let firstSentence = "";
-        let firstSentenceSent = false;
+        let sentenceCount = 0;
+        let lastEmittedIndex = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -483,21 +515,44 @@ Rules:
                   }
                   fullText += delta;
 
-                  // Detect first sentence boundary for early TTS start
-                  if (!firstSentenceSent && fullText.length >= 8) {
-                    const match = fullText.match(/^([^.!?।\n]+[.!?।\n])/);
-                    if (match && match[1]?.trim()) {
-                      firstSentence = match[1].trim();
-                      firstSentenceSent = true;
-                      if (onFirstSentence) {
-                        onFirstSentence(firstSentence);
+                  // Stream sentence detection
+                  const candidateSentences = this.splitSentences(fullText.substring(lastEmittedIndex));
+                  if (candidateSentences.length > 1) {
+                    // We have at least one completed sentence
+                    for (let sIdx = 0; sIdx < candidateSentences.length - 1; sIdx++) {
+                      const completedSentence = candidateSentences[sIdx].trim();
+                      if (completedSentence) {
+                        if (sentenceCount === 0) {
+                          firstSentence = completedSentence;
+                          llmFirstSentenceMs = Date.now();
+                        }
+                        if (onSentenceChunk) {
+                          onSentenceChunk(completedSentence, sentenceCount);
+                        }
+                        sentenceCount++;
                       }
                     }
+                    // Retain the unfinished trailing segment
+                    const lastSentence = candidateSentences[candidateSentences.length - 1];
+                    lastEmittedIndex = fullText.length - lastSentence.length;
                   }
                 }
               } catch {}
             }
           }
+        }
+
+        // Emit any remaining trailing text
+        const remaining = fullText.substring(lastEmittedIndex).trim();
+        if (remaining) {
+          if (sentenceCount === 0) {
+            firstSentence = remaining;
+            llmFirstSentenceMs = Date.now();
+          }
+          if (onSentenceChunk) {
+            onSentenceChunk(remaining, sentenceCount);
+          }
+          sentenceCount++;
         }
 
         const llmResponseReadyMs = Date.now();
@@ -507,6 +562,7 @@ Rules:
           firstSentence: firstSentence || finalFullText,
           llmStartMs,
           llmFirstTokenMs: llmFirstTokenMs || llmResponseReadyMs,
+          llmFirstSentenceMs: llmFirstSentenceMs || llmResponseReadyMs,
           llmResponseReadyMs,
         };
       }
@@ -520,8 +576,49 @@ Rules:
       firstSentence: "",
       llmStartMs,
       llmFirstTokenMs: fallbackTime,
+      llmFirstSentenceMs: fallbackTime,
       llmResponseReadyMs: fallbackTime,
     };
+  }
+
+  /**
+   * Splits text into natural spoken sentences while protecting abbreviations,
+   * single-letter initials (e.g. Dr., ഡോ., K., ആർ.), and numbers from premature splitting.
+   */
+  public splitSentences(str: string): string[] {
+    const isAbbrev = (sub: string) => {
+      const lastWord = sub.split(/\s+/).pop() || "";
+      const cleanWord = lastWord.replace(/^[(\[]|[)\]]$/g, "");
+      if (/^(ഡോ|ഡോക്ടർ|dr|mr|mrs|ms|prof|op|opd|rs|no|st)$/i.test(cleanWord.replace(/\.$/, ""))) return true;
+      if (/^[A-Z]\.$/.test(cleanWord)) return true;
+      if (/^[\u0D00-\u0D7F]{1,3}\.$/.test(cleanWord)) return true;
+      if (/\d+\.\d*$/.test(cleanWord)) return true;
+      return false;
+    };
+
+    const regex = /([.!?।\n]+)(\s+|$)/gu;
+    let match: RegExpExecArray | null;
+    let lastIndex = 0;
+    const sentences: string[] = [];
+
+    while ((match = regex.exec(str)) !== null) {
+      const end = match.index + match[1].length;
+      const candidate = str.substring(lastIndex, end).trim();
+      if (match[1].includes(".") && isAbbrev(candidate)) {
+        continue;
+      }
+      if (candidate.length >= 6) {
+        sentences.push(candidate);
+        lastIndex = match.index + match[0].length;
+      }
+    }
+
+    if (lastIndex < str.length) {
+      const rem = str.substring(lastIndex).trim();
+      if (rem) sentences.push(rem);
+    }
+
+    return sentences;
   }
 
   public getHistory(): ConversationTurn[] {

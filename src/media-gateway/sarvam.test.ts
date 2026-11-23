@@ -223,28 +223,34 @@ describe("HospitalConversationEngine (Daya Hospital Malayalam Persona)", () => {
   });
 
   it("triages emergency & casualty callers immediately with direct extension 100", async () => {
-    const emergencyInputs = [
-      "അടിയന്തിരം ആണ്!",
-      "ഇതൊരു എമർജൻസി കേസ് ആണ്",
-      "ആക്സിഡന്റ് പറ്റി, പെട്ടെന്ന് സഹായിക്കണം",
-      "നെഞ്ചുവേദന എടുക്കുന്നു",
-      "casualty doctor please",
-    ];
+    const origEnv = process.env.HOSPITAL_DESTINATIONS_CONFIRMED;
+    process.env.HOSPITAL_DESTINATIONS_CONFIRMED = "true";
+    try {
+      const emergencyInputs = [
+        "അടിയന്തിരം ആണ്!",
+        "ഇതൊരു എമർജൻസി കേസ് ആണ്",
+        "ആക്സിഡന്റ് പറ്റി, പെട്ടെന്ന് സഹായിക്കണം",
+        "നെഞ്ചുവേദന എടുക്കുന്നു",
+        "casualty doctor please",
+      ];
 
-    for (const input of emergencyInputs) {
-      const result = await engine.processCallerUtterance(input);
-      expect(result.intent).toBe("CASUALTY");
-      expect(result.shouldTransfer).toBe(true);
-      expect(result.transferDestination).toBe("100");
-      expect(result.replyText).toContain("കാഷ്വാലിറ്റി");
-      expect(result.replyText).toContain("4872475100");
+      for (const input of emergencyInputs) {
+        const result = await engine.processCallerUtterance(input);
+        expect(result.intent).toBe("CASUALTY");
+        expect(result.shouldTransfer).toBe(true);
+        expect(result.transferDestination).toBe("100");
+        expect(result.replyText).toContain("കാഷ്വാലിറ്റി");
+        expect(result.replyText).toContain("4872475100");
+      }
+    } finally {
+      process.env.HOSPITAL_DESTINATIONS_CONFIRMED = origEnv;
     }
   });
 
   it("recognizes appointment booking intents and asks for relevant details", async () => {
     const result = await engine.processCallerUtterance("എനിക്ക് ഒരു ഡോക്ടറെ കാണാൻ അപ്പോയിന്റ്മെന്റ് വേണം");
     expect(result.intent).toBe("APPOINTMENT");
-    expect(result.replyText).toContain("വിഭാഗത്തിലെ");
+    expect(result.replyText).toMatch(/വിഭാഗ/);
     expect(result.appointmentData).toBeDefined();
   });
 

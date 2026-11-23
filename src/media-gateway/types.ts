@@ -197,6 +197,7 @@ export interface TurnLatencyTimestamps {
   finalTranscriptMs: number;
   llmStartMs: number;
   llmFirstTokenMs?: number;
+  llmFirstSentenceMs?: number;
   llmResponseReadyMs: number;
   ttsStartMs: number;
   ttsFirstAudioMs: number;
@@ -210,6 +211,7 @@ export interface TurnLatencyDurations {
   llmFirstTokenToTtsAudioMs: number;
   ttsFirstAudioMs: number;
   totalSpeechEndToAudibleResponseMs: number;
+  firstSentenceLatencyMs?: number;
 }
 
 export interface TurnLatencyMetrics {
