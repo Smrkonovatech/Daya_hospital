@@ -96,7 +96,7 @@ describe("Sarvam Configuration & Secret Masking", () => {
         false
       );
       expect(readinessNoDb.state).toBe("DEGRADED");
-      expect(readinessNoDb.databaseConfigured).toBe(false);
+      expect(readinessNoDb.databaseConnected).toBe(false);
     });
 
     it("reports READY when both Sarvam and PostgreSQL persistence are fully configured and healthy", () => {
@@ -109,7 +109,7 @@ describe("Sarvam Configuration & Secret Masking", () => {
       expect(readiness.state).toBe("READY");
       expect(readiness.sarvamConfigured).toBe(true);
       expect(readiness.persistenceStatus).toBe("HEALTHY");
-      expect(readiness.databaseConfigured).toBe(true);
+      expect(readiness.databaseConnected).toBe(true);
       expect(readiness.reason).toContain("operational");
     });
   });

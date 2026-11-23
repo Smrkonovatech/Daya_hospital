@@ -111,10 +111,12 @@ export type GatewayReadinessState = "READY" | "DEGRADED" | "NOT_READY";
 export interface GatewayReadinessInfo {
   state: GatewayReadinessState;
   reason: string;
+  environmentMode: "DEVELOPMENT_TESTING" | "PRODUCTION";
   sarvamConfigured: boolean;
   sarvamMode: "PRODUCTION" | "MOCK_MODE";
   persistenceStatus: "HEALTHY" | "DEGRADED";
   databaseConfigured: boolean;
+  databaseConnected: boolean;
   unpersistedSessionCount: number;
 }
 
@@ -122,54 +124,61 @@ export interface GatewayReadinessInfo {
  * Evaluates the full production readiness of the media gateway runtime.
  * Strict rules:
  * - NOT_READY: Sarvam AI is not configured. Live patient calls cannot proceed in MOCK_MODE.
- * - DEGRADED: Sarvam AI is configured, but PostgreSQL database is missing or degraded.
+ * - DEGRADED: Sarvam AI is configured, but PostgreSQL database is missing, disconnected, or degraded.
  *             Calls can proceed with in-memory persistence buffering.
  * - READY: Both Sarvam AI and PostgreSQL persistence are fully configured and connected.
  */
 export function evaluateGatewayReadiness(
   sarvamConfig: SarvamConfig,
   persistenceHealth: { status: "HEALTHY" | "DEGRADED"; unpersistedSessionCount: number },
-  isDatabaseConfigured = Boolean(process.env.DATABASE_URL)
+  databaseConnected = Boolean(process.env.DATABASE_URL)
 ): GatewayReadinessInfo {
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    process.env.RAILWAY_ENVIRONMENT === "production";
+  const isDevelopmentMode = process.env.DEVELOPMENT_MODE !== "false";
+  const environmentMode = isDevelopmentMode ? "DEVELOPMENT_TESTING" : "PRODUCTION";
+  const isDatabaseConfigured = Boolean(process.env.DATABASE_URL);
 
   if (!sarvamConfig.isConfigured) {
     return {
       state: "NOT_READY",
-      reason: isProd
-        ? "CRITICAL_BLOCKED: Sarvam AI credentials not configured in production environment. Live telephony calls in MOCK_MODE are strictly prohibited."
-        : "Sarvam AI credentials not configured. Running in sandbox MOCK_MODE.",
+      reason: isDevelopmentMode
+        ? "Sarvam AI credentials not configured in development environment. Voice synthesis & STT disabled."
+        : "CRITICAL_BLOCKED: Sarvam AI credentials not configured in production environment. Live telephony calls in MOCK_MODE are strictly prohibited.",
+      environmentMode,
       sarvamConfigured: false,
       sarvamMode: "MOCK_MODE",
       persistenceStatus: persistenceHealth.status,
       databaseConfigured: isDatabaseConfigured,
+      databaseConnected,
       unpersistedSessionCount: persistenceHealth.unpersistedSessionCount,
     };
   }
 
-  if (persistenceHealth.status === "DEGRADED" || !isDatabaseConfigured) {
+  if (persistenceHealth.status === "DEGRADED" || !databaseConnected) {
     return {
       state: "DEGRADED",
       reason:
-        "Sarvam AI operational (live speech STT & TTS ready). PostgreSQL database not connected; execution logs buffered in durable in-memory reconciliation queue.",
+        "Sarvam AI operational (live speech STT & TTS ready). PostgreSQL database disconnected or degraded; execution logs buffered in durable in-memory reconciliation queue.",
+      environmentMode,
       sarvamConfigured: true,
       sarvamMode: "PRODUCTION",
       persistenceStatus: "DEGRADED",
       databaseConfigured: isDatabaseConfigured,
+      databaseConnected,
       unpersistedSessionCount: persistenceHealth.unpersistedSessionCount,
     };
   }
 
   return {
     state: "READY",
-    reason:
-      "Production media gateway fully operational. Sarvam AI real-time voice and PostgreSQL persistence are active.",
+    reason: isDevelopmentMode
+      ? "Development testing gateway operational. Real Sarvam AI voice and Neon PostgreSQL persistence active. Operating in development sandbox mode (demo appointments; no real patient calls)."
+      : "Production media gateway fully operational. Sarvam AI real-time voice and PostgreSQL persistence are active.",
+    environmentMode,
     sarvamConfigured: true,
     sarvamMode: "PRODUCTION",
     persistenceStatus: "HEALTHY",
     databaseConfigured: true,
+    databaseConnected: true,
     unpersistedSessionCount: persistenceHealth.unpersistedSessionCount,
   };
 }

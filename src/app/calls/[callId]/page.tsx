@@ -8,6 +8,9 @@ interface PageProps {
 
 export async function generateStaticParams() {
   const result = await callsService.getCalls({ limit: 50 });
+  if (result.calls.length === 0) {
+    return [{ callId: "call_901" }];
+  }
   return result.calls.map((c) => ({
     callId: c.id,
   }));

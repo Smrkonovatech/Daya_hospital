@@ -24,6 +24,7 @@ import {
 } from "./sarvam-config";
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { ivrFlowService } from "@/lib/services/ivr-flow-service";
+import { checkDatabaseConnection } from "@/lib/db/prisma";
 
 export class AgentStreamMediaGateway {
   private server: http.Server;
@@ -80,13 +81,22 @@ export class AgentStreamMediaGateway {
     };
 
     // 1. Create native HTTP server with /health and /status endpoints
-    this.server = http.createServer((req, res) => {
+    this.server = http.createServer(async (req, res) => {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
       if (url.pathname === "/health" || url.pathname === "/healthz") {
         const sarvam = getSarvamConfig();
         const persistence = ivrFlowService.getPersistenceHealth();
-        const readiness = evaluateGatewayReadiness(sarvam, persistence);
+        let isDbConnected = false;
+        let dbDetails = { connected: false, message: "" };
+        try {
+          const dbStatus = await checkDatabaseConnection();
+          isDbConnected = dbStatus.connected && persistence.status !== "DEGRADED";
+          dbDetails = { connected: dbStatus.connected, message: dbStatus.message };
+        } catch {
+          isDbConnected = false;
+        }
+        const readiness = evaluateGatewayReadiness(sarvam, persistence, isDbConnected);
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -94,9 +104,16 @@ export class AgentStreamMediaGateway {
             status: "ok",
             service: "smrkomed_exotel_media_gateway",
             readiness: readiness.state,
+            environmentMode: readiness.environmentMode,
             readinessReason: readiness.reason,
             sarvamConfigured: sarvam.isConfigured,
             mode: sarvam.mode,
+            database: {
+              configured: Boolean(process.env.DATABASE_URL),
+              connected: isDbConnected,
+              provider: "neon_postgresql",
+              message: dbDetails.message,
+            },
             persistenceStatus: persistence.status,
             activeCalls: mediaSessionManager.getActiveSessionCount(),
             uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
@@ -110,17 +127,33 @@ export class AgentStreamMediaGateway {
       if (url.pathname === "/" || url.pathname === "/status") {
         const sarvam = getSarvamConfig();
         const persistence = ivrFlowService.getPersistenceHealth();
-        const readiness = evaluateGatewayReadiness(sarvam, persistence);
+        let isDbConnected = false;
+        let dbDetails = { connected: false, message: "" };
+        try {
+          const dbStatus = await checkDatabaseConnection();
+          isDbConnected = dbStatus.connected && persistence.status !== "DEGRADED";
+          dbDetails = { connected: dbStatus.connected, message: dbStatus.message };
+        } catch {
+          isDbConnected = false;
+        }
+        const readiness = evaluateGatewayReadiness(sarvam, persistence, isDbConnected);
 
         res.writeHead(200, { "Content-Type": "application/json" });
         const includeDetailedMetrics = url.searchParams.get("metrics") === "true";
         res.end(
           JSON.stringify({
             name: "Smrkomed Exotel Voicebot Media Gateway",
-            version: "1.3.1",
+            version: "1.3.2",
             status: "ONLINE",
+            environmentMode: readiness.environmentMode,
             readiness: readiness.state,
             readinessReason: readiness.reason,
+            database: {
+              configured: Boolean(process.env.DATABASE_URL),
+              connected: isDbConnected,
+              provider: "neon_postgresql",
+              message: dbDetails.message,
+            },
             mockModeBlocked:
               process.env.NODE_ENV === "production" ||
               process.env.RAILWAY_ENVIRONMENT === "production",
