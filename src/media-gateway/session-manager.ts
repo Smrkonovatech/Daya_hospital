@@ -32,6 +32,7 @@ import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/li
 import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
 import { EmergencyDetector } from "@/lib/services/emergency-detector";
 import { LanguageDetector } from "@/lib/services/language-detector";
+import { aiOverflowService } from "@/lib/services/ai-overflow-service";
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
 
 export interface SocketSender {
@@ -61,6 +62,10 @@ export interface CallSessionInitOptions {
   ivrVersion?: number;
   ivrService?: IvrFlowService;
   enableIvrFlow?: boolean;
+  routingVersion?: number;
+  isOverflow?: boolean;
+  overflowReason?: string;
+  callSource?: "DIRECT" | "IVR_ROLLOVER" | "TRANSFER";
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -75,6 +80,9 @@ export class CallMediaSession extends EventEmitter {
   public readonly hospitalId: string;
   public readonly hospitalConfig: HospitalConfig;
   public readonly echoMode: boolean;
+  public readonly isOverflow: boolean;
+  public readonly overflowReason?: string;
+  public readonly callSource: "DIRECT" | "IVR_ROLLOVER" | "TRANSFER";
 
   public state: SessionState = "INITIALIZING";
   public readonly createdAt: Date = new Date();
@@ -138,6 +146,7 @@ export class CallMediaSession extends EventEmitter {
 
   // Phase 9.2: Authoritative Turn Controller, Sequence ID & Overlap Safeguards
   public currentTurnSequenceId = 0;
+  public routingVersion: number = 1;
   private currentTurnAbortController: AbortController | null = null;
   public isTurnActive = false;
   private lastProcessedTranscriptText = "";
@@ -183,6 +192,10 @@ export class CallMediaSession extends EventEmitter {
     });
     this.hospitalId = this.tenantResult.hospitalId;
     this.hospitalConfig = options.hospitalConfig || getHospitalConfig(this.hospitalId);
+    this.routingVersion = options.routingVersion || 1;
+    this.isOverflow = options.isOverflow ?? false;
+    this.overflowReason = options.overflowReason;
+    this.callSource = options.callSource || (this.isOverflow ? "IVR_ROLLOVER" : "DIRECT");
 
     if (options.ivrFlow) {
       this.ivrFlow = options.ivrFlow;
@@ -273,6 +286,7 @@ export class CallMediaSession extends EventEmitter {
               destination: casualtyDest,
               reason: this.transferReason,
               timestamp: Date.now(),
+              routingVersion: this.routingVersion,
             });
             console.log(
               `[CallSession ${this.callSid}] Continuous emergency in direct mode. Fast-tracking to ${casualtyDest}. Flushing audio and closing WebSocket.`
@@ -458,6 +472,17 @@ export class CallMediaSession extends EventEmitter {
    */
   public async initiateCallSession(): Promise<void> {
     if (this.isStopped) return;
+
+    if (this.isOverflow) {
+      this.isExecutingIvrFlow = false;
+      console.log(
+        `[CallSession ${this.callSid}] Call arrived via AI OVERFLOW (${this.overflowReason || "RECEPTIONIST_BUSY"}). Bypassing IVR menu and activating contextual AI assistant.`
+      );
+      if (this.autoPlayGreeting) {
+        await this.playInitialGreeting();
+      }
+      return;
+    }
 
     if (!this.ivrFlow) {
       const published = await this.ivrService.getActivePublishedFlow(
@@ -683,6 +708,7 @@ export class CallMediaSession extends EventEmitter {
           destination,
           reason: this.transferReason,
           timestamp: Date.now(),
+          routingVersion: this.routingVersion,
         });
 
         if (stepResult.audioText) {
@@ -775,6 +801,7 @@ export class CallMediaSession extends EventEmitter {
             destination: casualtyDestination,
             reason: this.transferReason,
             timestamp: Date.now(),
+            routingVersion: this.routingVersion,
           });
         } else {
           this.escalationState = "NONE";
@@ -947,7 +974,13 @@ export class CallMediaSession extends EventEmitter {
     const initialLang =
       this.ivrContext?.currentLanguage ||
       (this.hospitalConfig.voice?.primaryLanguage === "MALAYALAM" ? "ml-IN" : "en-IN");
-    const greeting = this.conversationEngine.getInitialGreeting(initialLang);
+    const greeting = this.isOverflow
+      ? aiOverflowService.getContextualGreeting(
+          initialLang,
+          this.overflowReason,
+          this.hospitalConfig.hospitalName
+        )
+      : this.conversationEngine.getInitialGreeting(initialLang);
     this.lastAiResponse = greeting;
     this.ttsStatus = "SYNTHESIZING";
 
@@ -1209,6 +1242,7 @@ export class CallMediaSession extends EventEmitter {
           destination: dest,
           reason: this.transferReason,
           timestamp: Date.now(),
+          routingVersion: this.routingVersion,
         });
 
         console.log(
@@ -1738,6 +1772,7 @@ export interface EscalationDecisionRecord {
   destination: string;
   reason: string;
   timestamp: number;
+  routingVersion?: number;
 }
 
 export class MediaSessionManager extends EventEmitter {

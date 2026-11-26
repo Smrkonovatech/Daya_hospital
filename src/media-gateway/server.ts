@@ -25,6 +25,9 @@ import {
 import { SarvamTextToSpeechProvider } from "./sarvam-tts";
 import { ivrFlowService } from "@/lib/services/ivr-flow-service";
 import { checkDatabaseConnection } from "@/lib/db/prisma";
+import { hospitalRoutingService } from "@/lib/services/hospital-routing-service";
+import { resolveHospitalByPhoneNumber } from "@/lib/config/hospital-config";
+import { aiOverflowService } from "@/lib/services/ai-overflow-service";
 
 export class AgentStreamMediaGateway {
   private server: http.Server;
@@ -187,7 +190,204 @@ export class AgentStreamMediaGateway {
         return;
       }
 
-      // 3. Exotel Passthru Applet decision endpoint (GET & POST)
+      // 3. Exotel Connect Applet Dynamic Destination endpoint (GET & POST)
+      // Carrier contract: Exotel Connect Applet "Dial Whom" Application URL
+      // Makes an HTTP GET request with CallSid, CallFrom, CallTo, Direction.
+      // Responds with HTTP 200 text/plain and the E.164 destination number.
+      const isConnectDestinationPath =
+        url.pathname === "/exotel/connect-destination" ||
+        url.pathname === "/api/telephony/connect-destination" ||
+        url.pathname === "/connect-destination";
+
+      if (isConnectDestinationPath) {
+        let callSid =
+          url.searchParams.get("CallSid") ||
+          url.searchParams.get("call_sid") ||
+          url.searchParams.get("callSid") ||
+          url.searchParams.get("Sid") ||
+          "";
+        let callerNumber =
+          url.searchParams.get("CallFrom") ||
+          url.searchParams.get("From") ||
+          url.searchParams.get("from") ||
+          "";
+        let dialedNumber =
+          url.searchParams.get("CallTo") ||
+          url.searchParams.get("To") ||
+          url.searchParams.get("to") ||
+          "";
+
+        if (req.method === "POST") {
+          try {
+            const bodyChunks: Buffer[] = [];
+            for await (const chunk of req) {
+              bodyChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+            }
+            const bodyStr = Buffer.concat(bodyChunks).toString("utf8");
+            if (bodyStr) {
+              try {
+                const jsonBody = JSON.parse(bodyStr);
+                callSid = jsonBody.CallSid || jsonBody.call_sid || jsonBody.callSid || callSid;
+                callerNumber = jsonBody.CallFrom || jsonBody.From || callerNumber;
+                dialedNumber = jsonBody.CallTo || jsonBody.To || dialedNumber;
+              } catch {
+                const formParams = new URLSearchParams(bodyStr);
+                callSid = formParams.get("CallSid") || formParams.get("call_sid") || formParams.get("callSid") || callSid;
+                callerNumber = formParams.get("CallFrom") || formParams.get("From") || callerNumber;
+                dialedNumber = formParams.get("CallTo") || formParams.get("To") || dialedNumber;
+              }
+            }
+          } catch (err) {
+            console.warn("[MediaGateway:ConnectDestination] Error parsing POST body:", err);
+          }
+        }
+
+        // 1. Authoritative resolution: Require CallSid (never guess tenant by From alone)
+        if (!callSid || !callSid.trim()) {
+          console.warn("[MediaGateway:ConnectDestination] Missing CallSid in request. Failing closed.");
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              error: "UNKNOWN_CALL_SID",
+              message: "CallSid is missing or invalid. Authoritative session resolution requires a valid Exotel CallSid.",
+              destination: null,
+            })
+          );
+          return;
+        }
+
+        // 2. Lookup escalation decision strictly by CallSid
+        const escalation = await mediaSessionManager.getEscalation(callSid);
+        if (!escalation) {
+          const raw = (mediaSessionManager as any).escalationRecords?.get(callSid);
+          if (raw && Date.now() - raw.timestamp >= 600000) {
+            console.warn(`[MediaGateway:ConnectDestination] Escalation record for CallSid='${callSid}' has expired (>10m). Failing closed.`);
+            res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(
+              JSON.stringify({
+                error: "EXPIRED_ESCALATION",
+                message: `The escalation decision for CallSid '${callSid}' has expired (exceeded 10-minute TTL).`,
+                destination: null,
+              })
+            );
+            return;
+          }
+          console.warn(`[MediaGateway:ConnectDestination] No escalation record found for CallSid='${callSid}'. Failing closed.`);
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              error: "NO_ESCALATION_RECORD",
+              message: `No transfer escalation (EMERGENCY or HUMAN_TRANSFER) was recorded for CallSid '${callSid}'.`,
+              destination: null,
+            })
+          );
+          return;
+        }
+
+        // 3. TTL Expiry Check (10 minutes)
+        const isExpired = Date.now() - escalation.timestamp > 600000;
+        if (isExpired) {
+          console.warn(`[MediaGateway:ConnectDestination] Escalation record for CallSid='${callSid}' has expired (>10m). Failing closed.`);
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              error: "EXPIRED_ESCALATION",
+              message: `The escalation decision for CallSid '${callSid}' has expired (exceeded 10-minute TTL).`,
+              destination: null,
+            })
+          );
+          return;
+        }
+
+        // 4. Authoritative Tenant Check
+        const hospitalId = escalation.hospitalId;
+        if (!hospitalId) {
+          console.warn(`[MediaGateway:ConnectDestination] Tenant unknown for CallSid='${callSid}'. Failing closed.`);
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              error: "UNKNOWN_TENANT",
+              message: "Hospital tenant could not be resolved from authoritative session.",
+              destination: null,
+            })
+          );
+          return;
+        }
+
+        // 5. Dynamic live destination resolution (isLiveCall: true enforces verified destinations)
+        const escalationType = escalation.escalationState || "HUMAN_TRANSFER";
+        const resolution = await hospitalRoutingService.resolveLiveDestination({
+          hospitalId,
+          callSid,
+          escalationType: escalationType as any,
+          versionNumber: escalation.routingVersion,
+          isLiveCall: true,
+        });
+
+        if (!resolution.success || !resolution.destinationNumber) {
+          console.warn(
+            `[MediaGateway:ConnectDestination] Resolution failed closed for CallSid='${callSid}' ` +
+            `(${hospitalId} / ${escalationType}): ${resolution.routingRule} - ${resolution.error}`
+          );
+          const statusCode = resolution.routingRule === "UNVERIFIED_TENANT_FAIL_CLOSED" ? 403 : 404;
+          res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(
+            JSON.stringify({
+              error: resolution.routingRule || "UNVERIFIED_DESTINATION",
+              message: resolution.error || "Destination could not be verified or is unapproved demo data.",
+              destination: null,
+            })
+          );
+          return;
+        }
+
+        // 6. Format Negotiation: Exotel Programmable Connect JSON by default, text/plain on request
+        const acceptHeader = (req.headers["accept"] as string) || "";
+        const formatParam = url.searchParams.get("format") || "";
+        const wantsText = formatParam === "text" || acceptHeader === "text/plain";
+
+        const commonHeaders = {
+          "X-SMRKOMED-Tenant": resolution.hospitalId,
+          "X-SMRKOMED-Escalation": resolution.escalationType,
+          "X-SMRKOMED-Version": String(resolution.versionUsed),
+          "X-SMRKOMED-Routing-Rule": resolution.routingRule,
+        };
+
+        console.log(
+          `[MediaGateway:ConnectDestination] Resolved destination for CallSid='${callSid}' ` +
+          `(${hospitalId} / ${escalationType} / v${resolution.versionUsed}): ${resolution.destinationNumber} [${resolution.departmentName}] ` +
+          `(Format: ${wantsText ? "text/plain" : "application/json"})`
+        );
+
+        if (wantsText) {
+          res.writeHead(200, {
+            ...commonHeaders,
+            "Content-Type": "text/plain; charset=utf-8",
+          });
+          res.end(resolution.destinationNumber);
+          return;
+        }
+
+        // Standard Exotel Programmable Connect JSON contract response
+        const payload = {
+          fetch_after_attempt: false,
+          destination: {
+            numbers: [resolution.destinationNumber],
+          },
+          record: true,
+          outgoing_phone_number: "08047291658",
+          max_ringing_duration: 25,
+        };
+
+        res.writeHead(200, {
+          ...commonHeaders,
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      // 4. Exotel Passthru Applet decision endpoint (GET & POST)
       const isPassthruPath =
         url.pathname === "/exotel/passthru" ||
         url.pathname === "/api/telephony/passthru-routing" ||
@@ -481,6 +681,21 @@ export class AgentStreamMediaGateway {
               ? false
               : (this.config.autoPlayGreeting ?? true);
 
+            // Phase B: Detect AI Overflow from Exotel IVR / carrier parameters or recorded events
+            const isOverflowQuery = wsUrl?.searchParams.get("overflow") === "true";
+            let overflowReason = wsUrl?.searchParams.get("reason") || undefined;
+            let isOverflow = isOverflowQuery;
+
+            if (!isOverflow && customField) {
+              try {
+                const parsedCustom = JSON.parse(customField);
+                if (parsedCustom.overflow === true || parsedCustom.isOverflow === true) {
+                  isOverflow = true;
+                  overflowReason = parsedCustom.reason || overflowReason;
+                }
+              } catch {}
+            }
+
             activeSession = new CallMediaSession({
               streamSid,
               callSid,
@@ -493,9 +708,12 @@ export class AgentStreamMediaGateway {
               audioEngine,
               autoPlayGreeting: sessionAutoGreeting,
               echoMode: sessionEchoMode,
-              enableIvrFlow: !sessionEchoMode,
+              enableIvrFlow: !sessionEchoMode && !isOverflow,
               silenceTimeoutMs: this.config.silenceTimeoutMs,
               ttsPace: this.config.ttsPace,
+              isOverflow,
+              overflowReason,
+              callSource: isOverflow ? "IVR_ROLLOVER" : "DIRECT",
             });
 
             mediaSessionManager.registerSession(activeSession);

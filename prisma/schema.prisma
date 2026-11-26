@@ -115,6 +115,15 @@ enum PriorityLevel {
   LOW
 }
 
+enum StaffPresenceStatus {
+  AVAILABLE
+  RINGING
+  ON_CALL
+  WRAP_UP
+  BREAK
+  OFFLINE
+}
+
 // ----------------------------------------------------
 // 1. USERS & ROLES
 // ----------------------------------------------------
@@ -837,4 +846,87 @@ model FlowAuditEvent {
 
   @@index([hospitalId, flowId])
   @@index([hospitalId, createdAt])
+}
+
+// ----------------------------------------------------
+// 12. STAFF & RECEPTIONIST PRESENCE (HUMAN-FIRST ROUTING)
+// ----------------------------------------------------
+
+model StaffPresence {
+  id                  String                 @id @default(cuid())
+  hospitalId          String
+  userId              String
+  staffName           String
+  extension           String?
+  phoneNumber         String?
+  status              StaffPresenceStatus    @default(OFFLINE)
+  currentCallSid      String?
+  assignedAt          DateTime?
+  ringStartedAt       DateTime?
+  callAnsweredAt      DateTime?
+  lastStatusChangeAt  DateTime               @default(now())
+  callsHandledToday   Int                    @default(0)
+  missedCallsToday    Int                    @default(0)
+  metadata            Json?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  auditLogs           StaffPresenceAuditLog[]
+
+  @@unique([hospitalId, userId])
+  @@index([hospitalId, status])
+  @@index([hospitalId, currentCallSid])
+}
+
+model StaffPresenceAuditLog {
+  id                  String                 @id @default(cuid())
+  hospitalId          String
+  staffPresenceId     String
+  userId              String
+  previousStatus      StaffPresenceStatus
+  newStatus           StaffPresenceStatus
+  reason              String
+  callSid             String?
+  actor               String                 @default("SYSTEM")
+  details             Json?
+  timestamp           DateTime               @default(now())
+
+  staffPresence       StaffPresence          @relation(fields: [staffPresenceId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, staffPresenceId])
+  @@index([hospitalId, timestamp])
+  @@index([callSid])
+}
+
+// ----------------------------------------------------
+// 13. AI OVERFLOW LOGS & TELEPHONY ANALYTICS (PHASE B)
+// ----------------------------------------------------
+
+enum AiOverflowReason {
+  RECEPTIONIST_BUSY
+  RING_TIMEOUT
+  RECEPTIONIST_OFFLINE
+  RECEPTIONIST_BREAK
+  NO_STAFF_CONFIGURED
+  CONCURRENCY_CONFLICT
+  MANUAL_OVERFLOW
+}
+
+model AiOverflowLog {
+  id                  String             @id @default(cuid())
+  hospitalId          String
+  callSid             String
+  callerNumber        String
+  dialedNumber        String?
+  reason              AiOverflowReason
+  targetStaffUserId   String?
+  targetStaffName     String?
+  ringDurationSeconds Int?
+  handledByAi         Boolean            @default(true)
+  context             Json?
+  timestamp           DateTime           @default(now())
+
+  @@index([hospitalId, timestamp])
+  @@index([callSid])
+  @@index([reason])
 }
