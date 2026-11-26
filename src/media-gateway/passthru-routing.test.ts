@@ -172,4 +172,32 @@ describe("Exotel Passthru Routing & Escalation Protocol", () => {
     session.executeIdempotentTeardown(1000, "Duplicate Teardown");
     expect(closeCallCount).toBe(1);
   });
+
+  it("10. Exotel Connect Applet: Dynamically resolves E.164 phone number for Connect Applet Application URL", async () => {
+    const { hospitalRoutingService } = await import("@/lib/services/hospital-routing-service");
+
+    const record: EscalationDecisionRecord = {
+      callSid: "call_dynamic_connect_test",
+      streamSid: "stream_dynamic",
+      hospitalId: "hosp_daya_thrissur",
+      callerNumber: "+919846001122",
+      escalationState: "HUMAN_TRANSFER",
+      destination: "+919606654032",
+      reason: "Live receptionist transfer",
+      timestamp: Date.now(),
+    };
+
+    await mediaSessionManager.recordEscalation(record);
+
+    // Resolve via hospitalRoutingService as server.ts does
+    const resolved = await hospitalRoutingService.resolveLiveDestination({
+      hospitalId: "hosp_daya_thrissur",
+      callSid: "call_dynamic_connect_test",
+      escalationType: "HUMAN_TRANSFER",
+    });
+
+    expect(resolved.success).toBe(true);
+    expect(resolved.destinationNumber).toBe("+919606654032");
+    expect(resolved.departmentName).toBe("Main Inbound Reception");
+  });
 });

@@ -32,7 +32,7 @@ import { IvrFlowData, FlowExecutionContext, FlowExecutionStepResult } from "@/li
 import { exotelTelephonyService } from "@/lib/services/exotel-telephony-service";
 import { EmergencyDetector } from "@/lib/services/emergency-detector";
 import { LanguageDetector } from "@/lib/services/language-detector";
-import { aiOverflowService } from "@/lib/services/ai-overflow-service";
+import { aiOverflowService, ConversationalEngineType } from "@/lib/services/ai-overflow-service";
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
 
 export interface SocketSender {
@@ -66,6 +66,7 @@ export interface CallSessionInitOptions {
   isOverflow?: boolean;
   overflowReason?: string;
   callSource?: "DIRECT" | "IVR_ROLLOVER" | "TRANSFER";
+  engineUsed?: ConversationalEngineType;
 }
 
 export class CallMediaSession extends EventEmitter {
@@ -83,6 +84,7 @@ export class CallMediaSession extends EventEmitter {
   public readonly isOverflow: boolean;
   public readonly overflowReason?: string;
   public readonly callSource: "DIRECT" | "IVR_ROLLOVER" | "TRANSFER";
+  public readonly engineUsed: ConversationalEngineType;
 
   public state: SessionState = "INITIALIZING";
   public readonly createdAt: Date = new Date();
@@ -196,6 +198,11 @@ export class CallMediaSession extends EventEmitter {
     this.isOverflow = options.isOverflow ?? false;
     this.overflowReason = options.overflowReason;
     this.callSource = options.callSource || (this.isOverflow ? "IVR_ROLLOVER" : "DIRECT");
+    this.engineUsed =
+      options.engineUsed ||
+      (process.env.CONVERSATION_ENGINE_MODE === "SARVAM_VOICE_AGENTS"
+        ? "SARVAM_VOICE_AGENTS"
+        : "SARVAM_CORE_CUSTOM_FALLBACK");
 
     if (options.ivrFlow) {
       this.ivrFlow = options.ivrFlow;

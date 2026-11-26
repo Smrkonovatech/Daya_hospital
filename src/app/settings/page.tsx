@@ -44,6 +44,8 @@ import {
   HospitalSettingsFormData,
 } from "@/lib/validations/auth-schema";
 import { HospitalSettings } from "@/lib/services/settings-service";
+import { HospitalRoutingSettings } from "@/components/settings/hospital-routing-settings";
+import { SarvamVoiceAgentSettings } from "@/components/settings/sarvam-voice-agent-settings";
 
 export default function SettingsPage() {
   const { showToast } = useToast();
@@ -402,6 +404,8 @@ export default function SettingsPage() {
             <TabsTrigger value="privacy">Call Recording & Privacy</TabsTrigger>
             <TabsTrigger value="status">System Status & Gateways</TabsTrigger>
             <TabsTrigger value="telephony">Telephony Provider (Exotel)</TabsTrigger>
+            <TabsTrigger value="routing">Dynamic Call Routing</TabsTrigger>
+            <TabsTrigger value="voice_agents">Voice Agents (Samvaad)</TabsTrigger>
             <TabsTrigger value="ai_provider">AI Provider (Sarvam)</TabsTrigger>
             <TabsTrigger value="business">Business Hours & Escalation</TabsTrigger>
             <TabsTrigger value="versions">Configuration Versions</TabsTrigger>
@@ -1097,6 +1101,16 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* TAB 6.1: DYNAMIC CALL ROUTING (PHASE 9.6) */}
+          <TabsContent value="routing">
+            <HospitalRoutingSettings initialHospitalId="hosp_daya_thrissur" />
+          </TabsContent>
+
+          {/* TAB 6.2: SARVAM VOICE AGENTS / SAMVAAD (PHASE 10) */}
+          <TabsContent value="voice_agents">
+            <SarvamVoiceAgentSettings />
           </TabsContent>
 
           {/* TAB 7: AI PROVIDER (SARVAM) */}

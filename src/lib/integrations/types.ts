@@ -1,5 +1,5 @@
 export interface IntegrationHealth {
-  service: "sarvam_ai" | "daya_hms" | "telephony_ivr";
+  service: "sarvam_ai" | "sarvam_voice_agents" | "daya_hms" | "telephony_ivr";
   status: "HEALTHY" | "DEGRADED" | "DOWN";
   latencyMs: number;
   mode: "MOCK_MODE" | "PRODUCTION";

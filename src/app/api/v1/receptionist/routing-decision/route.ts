@@ -16,6 +16,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { receptionistPresenceService } from "@/lib/services/receptionist-presence-service";
 import { aiOverflowService, AiOverflowReason } from "@/lib/services/ai-overflow-service";
 import { getHospitalConfig } from "@/lib/config/hospital-config";
+import { hospitalRoutingService } from "@/lib/services/hospital-routing-service";
+import { dynamicExotelRoutingAdapter } from "@/lib/services/dynamic-exotel-routing-adapter";
 
 export async function GET(request: NextRequest) {
   return handleRoutingDecision(request);
@@ -48,6 +50,15 @@ async function handleRoutingDecision(request: NextRequest) {
       searchParams.get("hospitalId") ||
       request.headers.get("x-hospital-id") ||
       "";
+    let routingToken =
+      searchParams.get("token") ||
+      searchParams.get("routingToken") ||
+      request.headers.get("x-smrko-routing-token") ||
+      request.headers.get("x-routing-token") ||
+      (request.headers.get("authorization")?.startsWith("Bearer ")
+        ? request.headers.get("authorization")?.slice(7)
+        : undefined) ||
+      undefined;
 
     if (request.method === "POST") {
       try {
@@ -58,12 +69,14 @@ async function handleRoutingDecision(request: NextRequest) {
           callerNumber = json.CallFrom || json.From || callerNumber;
           dialedNumber = json.CallTo || json.To || dialedNumber;
           hospitalId = json.hospitalId || hospitalId;
+          routingToken = json.token || json.routingToken || routingToken;
         } else if (contentType.includes("application/x-www-form-urlencoded")) {
           const formData = await request.formData();
           callSid = (formData.get("CallSid") as string) || callSid;
           callerNumber = (formData.get("CallFrom") as string) || (formData.get("From") as string) || callerNumber;
           dialedNumber = (formData.get("CallTo") as string) || (formData.get("To") as string) || dialedNumber;
           hospitalId = (formData.get("hospitalId") as string) || hospitalId;
+          routingToken = (formData.get("token") as string) || (formData.get("routingToken") as string) || routingToken;
         }
       } catch {}
     }
@@ -81,22 +94,63 @@ async function handleRoutingDecision(request: NextRequest) {
       );
     }
 
-    const hospitalConfig = getHospitalConfig(hospitalId || undefined);
-    const resolvedHospitalId = hospitalConfig.hospitalId;
+    // Authoritative tenant context verification
+    const tenantAuth = await dynamicExotelRoutingAdapter.verifyAndResolveTenantContext({
+      callSid,
+      callTo: dialedNumber,
+      callFrom: callerNumber,
+      hospitalId: hospitalId || undefined,
+      routingToken,
+    });
+
+    if (!tenantAuth.verified) {
+      return NextResponse.json(
+        {
+          decision: "FAIL_CLOSED",
+          action: "HANGUP",
+          error: "UNTRUSTED_TENANT",
+          message: tenantAuth.error || "Tenant verification failed.",
+        },
+        { status: tenantAuth.statusCode || 403 }
+      );
+    }
+
+    const resolvedHospitalId = tenantAuth.hospitalId;
+    const hospitalConfig = getHospitalConfig(resolvedHospitalId);
+
+    const publishedConfig = await hospitalRoutingService.getPublishedVersion(resolvedHospitalId);
+    const ringTimeout =
+      publishedConfig?.receptionistRingTimeoutSeconds ||
+      hospitalConfig.routing.ringTimeoutSeconds ||
+      20;
+    const aiOverflowEnabled = publishedConfig?.aiOverflowEnabled !== false;
 
     // 1. Check receptionist availability and attempt atomic lock
     const assignment = await receptionistPresenceService.assignCallToAvailableReceptionist({
       hospitalId: resolvedHospitalId,
       callSid,
-      ringTimeoutSeconds: 20,
+      ringTimeoutSeconds: ringTimeout,
     });
 
     if (assignment.assigned && assignment.staff) {
       // Human receptionist is AVAILABLE and now in RINGING state
       const destinationNumber =
         assignment.staff.phoneNumber ||
-        hospitalConfig.routing.receptionistNumber ||
-        "+919606654032";
+        publishedConfig?.receptionistDestination?.primaryNumber ||
+        hospitalConfig.routing.receptionistNumber;
+
+      if (!destinationNumber) {
+        return NextResponse.json(
+          {
+            decision: "FAIL_CLOSED",
+            action: "HANGUP",
+            error: "NO_RECEPTIONIST_DESTINATION",
+            message: `Tenant '${resolvedHospitalId}' has no published receptionist phone number configured.`,
+            hospitalId: resolvedHospitalId,
+          },
+          { status: 422 }
+        );
+      }
 
       return NextResponse.json({
         decision: "HUMAN_RECEPTIONIST",
@@ -105,8 +159,8 @@ async function handleRoutingDecision(request: NextRequest) {
         destination: {
           numbers: [destinationNumber],
         },
-        outgoing_phone_number: "08047291658",
-        max_ringing_duration: 20,
+        outgoing_phone_number: dialedNumber || "08047291658",
+        max_ringing_duration: ringTimeout,
         staff: {
           userId: assignment.staff.userId,
           staffName: assignment.staff.staffName,
@@ -118,7 +172,29 @@ async function handleRoutingDecision(request: NextRequest) {
       });
     }
 
-    // 2. No receptionist is currently available -> Map reason and overflow to AI
+    // 2. No receptionist is currently available -> Check if AI overflow is disabled
+    if (!aiOverflowEnabled) {
+      const fallbackNumber =
+        publishedConfig?.humanFallbackDestination?.primaryNumber ||
+        publishedConfig?.receptionistDestination?.primaryNumber ||
+        hospitalConfig.routing.receptionistNumber;
+
+      return NextResponse.json({
+        decision: "HUMAN_FALLBACK",
+        action: "DIAL",
+        fetch_after_attempt: false,
+        destination: {
+          numbers: [fallbackNumber || ""],
+        },
+        outgoing_phone_number: dialedNumber || "08047291658",
+        max_ringing_duration: ringTimeout,
+        reason: "AI_OVERFLOW_DISABLED_ROUTING_TO_FALLBACK",
+        callSid,
+        hospitalId: resolvedHospitalId,
+      });
+    }
+
+    // Map overflow reason
     let overflowReason: AiOverflowReason = "RECEPTIONIST_BUSY";
     if (assignment.reason === "ALL_OFFLINE") {
       overflowReason = "RECEPTIONIST_OFFLINE";
@@ -130,6 +206,12 @@ async function handleRoutingDecision(request: NextRequest) {
       overflowReason = "CONCURRENCY_CONFLICT";
     }
 
+    // Determine explicit conversational engine mode
+    const engineUsed =
+      process.env.CONVERSATION_ENGINE_MODE === "SARVAM_VOICE_AGENTS"
+        ? "SARVAM_VOICE_AGENTS"
+        : "SARVAM_CORE_CUSTOM_FALLBACK";
+
     // Record the overflow event for analytics & contextual greeting
     await aiOverflowService.recordOverflow({
       hospitalId: resolvedHospitalId,
@@ -138,20 +220,24 @@ async function handleRoutingDecision(request: NextRequest) {
       dialedNumber: dialedNumber || undefined,
       reason: overflowReason,
       handledByAi: true,
+      engineUsed,
       context: {
         rawAssignmentReason: assignment.reason,
+        engineSelected: engineUsed,
       },
     });
 
+    const targetApplet = dynamicExotelRoutingAdapter.getTargetVoicebotApplet();
     const voicebotUrl = `wss://dayahospital-production-467a7d31.up.railway.app/exotel/voicebot?overflow=true&reason=${encodeURIComponent(
       overflowReason.toLowerCase()
-    )}`;
+    )}&target_applet=${targetApplet}`;
 
     return NextResponse.json({
       decision: "AI_OVERFLOW",
       action: "CONNECT_VOICEBOT",
       reason: overflowReason,
-      targetApplet: "1393239",
+      engine: engineUsed,
+      targetApplet,
       voicebotUrl,
       callSid,
       hospitalId: resolvedHospitalId,

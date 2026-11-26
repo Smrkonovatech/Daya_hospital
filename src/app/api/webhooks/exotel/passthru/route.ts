@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mediaSessionManager } from "@/media-gateway/session-manager";
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
+import { hospitalRoutingService } from "@/lib/services/hospital-routing-service";
 
 export async function GET(request: NextRequest) {
   return handlePassthru(request);
@@ -78,9 +79,13 @@ async function handlePassthru(request: NextRequest) {
           OR: [{ externalReference: callSid }, { idempotencyKey: { contains: callSid } }],
           actionType: "TRANSFER_CALL_TO_STAFF",
         },
+        include: { call: { select: { hospitalId: true } } },
         orderBy: { createdAt: "desc" },
       });
       if (action) {
+        const hospitalId = (action as any).call?.hospitalId || "hosp_daya_thrissur";
+        const published = await hospitalRoutingService.getPublishedVersion(hospitalId);
+        const resolvedDest = published?.receptionistDestination?.primaryNumber || "";
         return NextResponse.json(
           {
             status: "PASS",
@@ -88,7 +93,7 @@ async function handlePassthru(request: NextRequest) {
             transfer: true,
             action: "CONNECT",
             escalationState: "HUMAN_TRANSFER",
-            destination: "+919606654032",
+            destination: resolvedDest,
             reason: action.staffNotes || "Staff transfer found in DB ledger",
             callSid,
           },

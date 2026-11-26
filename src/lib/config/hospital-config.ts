@@ -28,7 +28,8 @@ export interface ExotelHospitalConfig {
   apiToken: string;
   subdomain?: string;
   baseUrl?: string;
-  defaultAppId?: string; // Voicebot Applet ID
+  defaultAppId?: string; // Voicebot Applet ID (Live Production: 1393239)
+  stagingAppId?: string; // Isolated Staging Voicebot Applet ID: 1393240
   defaultExoPhone?: string; // Virtual incoming/outbound number (+91...)
   mediaGatewayWsUrl?: string; // wss://voice.smrkomed.com/exotel/voicebot
   webhookSecret?: string;
@@ -87,6 +88,8 @@ export interface RoutingHospitalConfig {
   casualtyExtension: string;
   casualtyDirectNumber: string;
   receptionistNumber?: string;
+  receiverClassification?: "TEMPORARY_DEV_TEST_RECEIVER" | "VERIFIED_CLINICAL_TRUNK";
+  emergencyLivePstnTransferEnabled?: boolean;
 }
 
 export interface HospitalConfig {
@@ -95,6 +98,8 @@ export interface HospitalConfig {
   shortName: string;
   city: string;
   state: string;
+  isVerified?: boolean;
+  verificationStatus?: "VERIFIED_LIVE" | "UNVERIFIED_DEMO_SANDBOX";
   telephony: TelephonyHospitalConfig;
   hms: HmsHospitalConfig;
   voice: VoiceHospitalConfig;
@@ -113,6 +118,8 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
   shortName: "Daya Hospital",
   city: "Thrissur",
   state: "Kerala",
+  isVerified: true,
+  verificationStatus: "VERIFIED_LIVE",
   telephony: {
     provider: isExotelPrimary ? "EXOTEL" : "BITVOICE",
     providerName: isExotelPrimary ? "Exotel Telephony Cloud" : "BitVoice Telephony",
@@ -149,6 +156,7 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
       subdomain: process.env.EXOTEL_SUBDOMAIN || "api",
       baseUrl: process.env.EXOTEL_BASE_URL || "https://api.exotel.com",
       defaultAppId: process.env.EXOTEL_DEFAULT_APP_ID || "1393239",
+      stagingAppId: process.env.EXOTEL_STAGING_APP_ID || "1393240",
       defaultExoPhone: process.env.EXOTEL_DEFAULT_EXOPHONE || "08047291658",
       mediaGatewayWsUrl:
         process.env.VOICE_GATEWAY_PUBLIC_URL ||
@@ -191,8 +199,132 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
     ringTimeoutSeconds: 20,
     maxHops: 3,
     casualtyExtension: "100",
+    // RECLASSIFIED PER PHASE 10.8: Strictly temporary development test receiver.
+    // Live carrier emergency PSTN transfer is disabled until hospital-approved clinical casualty trunk is confirmed.
     casualtyDirectNumber: process.env.DAYA_CASUALTY_NUMBER || "+919606654032",
     receptionistNumber: process.env.DAYA_RECEPTION_NUMBER || "+919606654032",
+    receiverClassification: "TEMPORARY_DEV_TEST_RECEIVER",
+    emergencyLivePstnTransferEnabled: false,
+  },
+};
+
+export const ASTER_MEDCITY_CONFIG: HospitalConfig = {
+  hospitalId: "hosp_aster_medcity",
+  hospitalName: "Aster Medcity Kochi",
+  shortName: "Aster Medcity",
+  city: "Kochi",
+  state: "Kerala",
+  isVerified: false,
+  verificationStatus: "UNVERIFIED_DEMO_SANDBOX",
+  telephony: {
+    provider: "EXOTEL",
+    providerName: "Exotel Telephony Cloud",
+    incomingHospitalNumber: "+914846699000",
+    aliasPhoneNumbers: ["08047291999", "+914846699000"],
+    forwardingScope: "APPOINTMENT_ONLY",
+    totalChannels: 30,
+    apiConfigured: true,
+    webhookSecret: "exotel_webhook_secret_aster_2026",
+    status: "MOCK_SANDBOX",
+    providerCoordinationNotes: "Aster Medcity demo sandbox trunk (UNVERIFIED DEMO DATA - live calls fail closed).",
+    exotel: {
+      accountSid: "smrkonova_aster",
+      apiKey: "exotel_key_aster",
+      apiToken: "exotel_token_aster",
+      subdomain: "api",
+      baseUrl: "https://api.exotel.com",
+      defaultAppId: "1393240",
+      defaultExoPhone: "08047291999",
+      mediaGatewayWsUrl: "wss://dayahospital-production-467a7d31.up.railway.app/exotel/voicebot",
+      ringTimeoutSeconds: 20,
+    },
+  },
+  hms: {
+    product: "MOCK",
+    productName: "Aster HMS",
+    vpnRequired: false,
+    vpnStatus: "CONNECTED",
+    timeoutMs: 3000,
+    idempotencyRequired: true,
+    status: "CONNECTED",
+  },
+  voice: {
+    engine: "SMRKO_VOICE",
+    primaryLanguage: "MALAYALAM",
+    fallbackLanguage: "ENGLISH",
+    speechModelVersion: "Smrko Voice Saarathi v2.4",
+  },
+  routing: {
+    appointmentOnly: true,
+    daytimeAgents: 5,
+    expectedDailyIncoming: 1200,
+    expectedDailyAbandoned: 100,
+    peakPeriod: "09:00 - 13:00",
+    ringTimeoutSeconds: 20,
+    maxHops: 3,
+    casualtyExtension: "100",
+    casualtyDirectNumber: "+914846699999",
+    receptionistNumber: "+914846699000",
+  },
+};
+
+export const KIMS_HOSPITAL_CONFIG: HospitalConfig = {
+  hospitalId: "hosp_kims_trivandrum",
+  hospitalName: "KIMSHEALTH Trivandrum",
+  shortName: "KIMSHEALTH",
+  city: "Trivandrum",
+  state: "Kerala",
+  isVerified: false,
+  verificationStatus: "UNVERIFIED_DEMO_SANDBOX",
+  telephony: {
+    provider: "EXOTEL",
+    providerName: "Exotel Telephony Cloud",
+    incomingHospitalNumber: "+914713041000",
+    aliasPhoneNumbers: ["08047291888", "+914713041000"],
+    forwardingScope: "APPOINTMENT_ONLY",
+    totalChannels: 30,
+    apiConfigured: true,
+    webhookSecret: "exotel_webhook_secret_kims_2026",
+    status: "MOCK_SANDBOX",
+    providerCoordinationNotes: "KIMSHEALTH demo sandbox trunk (UNVERIFIED DEMO DATA - live calls fail closed).",
+    exotel: {
+      accountSid: "smrkonova_kims",
+      apiKey: "exotel_key_kims",
+      apiToken: "exotel_token_kims",
+      subdomain: "api",
+      baseUrl: "https://api.exotel.com",
+      defaultAppId: "1393241",
+      defaultExoPhone: "08047291888",
+      mediaGatewayWsUrl: "wss://dayahospital-production-467a7d31.up.railway.app/exotel/voicebot",
+      ringTimeoutSeconds: 20,
+    },
+  },
+  hms: {
+    product: "MOCK",
+    productName: "KIMS HMS",
+    vpnRequired: false,
+    vpnStatus: "CONNECTED",
+    timeoutMs: 3000,
+    idempotencyRequired: true,
+    status: "CONNECTED",
+  },
+  voice: {
+    engine: "SMRKO_VOICE",
+    primaryLanguage: "MALAYALAM",
+    fallbackLanguage: "ENGLISH",
+    speechModelVersion: "Smrko Voice Saarathi v2.4",
+  },
+  routing: {
+    appointmentOnly: true,
+    daytimeAgents: 6,
+    expectedDailyIncoming: 1500,
+    expectedDailyAbandoned: 120,
+    peakPeriod: "08:30 - 12:30",
+    ringTimeoutSeconds: 20,
+    maxHops: 3,
+    casualtyExtension: "100",
+    casualtyDirectNumber: "+914713041999",
+    receptionistNumber: "+914713041234",
   },
 };
 
@@ -202,6 +334,8 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
 export const HOSPITAL_REGISTRY: Record<string, HospitalConfig> = {
   hosp_daya_thrissur: DAYA_HOSPITAL_CONFIG,
   "daya-hospital": DAYA_HOSPITAL_CONFIG,
+  hosp_aster_medcity: ASTER_MEDCITY_CONFIG,
+  hosp_kims_trivandrum: KIMS_HOSPITAL_CONFIG,
 };
 
 export const GENERIC_HOSPITAL_CONFIG: HospitalConfig = {

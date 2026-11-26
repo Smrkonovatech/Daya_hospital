@@ -20,6 +20,22 @@ import { AiOverflowReason } from "@prisma/client";
 
 export type { AiOverflowReason };
 
+export type ConversationalEngineType = "SARVAM_VOICE_AGENTS" | "SARVAM_CORE_CUSTOM_FALLBACK";
+
+export interface AiOverflowTelemetry {
+  hospitalId: string;
+  callSid: string;
+  engineSelected: ConversationalEngineType;
+  engineFallbackActive: boolean;
+  engineReason: string;
+  deploymentId: string;
+  appId: string;
+  appVersion: number;
+  toolsBound: string[];
+  hmsMode: "LIVE_CONFIRMED_HMS" | "SIMULATED_MOCK_HMS";
+  [key: string]: any;
+}
+
 export interface AiOverflowRecord {
   id: string;
   hospitalId: string;
@@ -31,6 +47,8 @@ export interface AiOverflowRecord {
   targetStaffName?: string | null;
   ringDurationSeconds?: number | null;
   handledByAi: boolean;
+  engineUsed?: ConversationalEngineType;
+  telemetry?: AiOverflowTelemetry;
   context?: Record<string, unknown> | null;
   timestamp: Date;
 }
@@ -67,6 +85,7 @@ export class AiOverflowService {
     targetStaffName?: string;
     ringDurationSeconds?: number;
     handledByAi?: boolean;
+    engineUsed?: ConversationalEngineType;
     context?: Record<string, unknown>;
     timestamp?: Date;
   }): Promise<AiOverflowRecord> {
@@ -80,9 +99,24 @@ export class AiOverflowService {
       targetStaffName,
       ringDurationSeconds,
       handledByAi = true,
+      engineUsed = (process.env.CONVERSATION_ENGINE_MODE === "SARVAM_VOICE_AGENTS" ? "SARVAM_VOICE_AGENTS" : "SARVAM_CORE_CUSTOM_FALLBACK"),
       context,
       timestamp = new Date(),
     } = params;
+
+    const engineFallbackActive = engineUsed === "SARVAM_CORE_CUSTOM_FALLBACK";
+    const telemetry: AiOverflowTelemetry = {
+      hospitalId,
+      callSid,
+      engineSelected: engineUsed,
+      engineFallbackActive,
+      engineReason: (context?.engineReason as string) || (engineFallbackActive ? "VOICE_AGENT_CARRIER_TIMEOUT_OR_DEV_FALLBACK" : "PRIMARY_VOICE_AGENT_DEPLOYMENT"),
+      deploymentId: "Inbound-3b5df8df-f098",
+      appId: "smrkomed-8401f738-b749",
+      appVersion: 8,
+      toolsBound: ["context", "check-availability", "book-appointment", "emergency-escalate", "call-ended"],
+      hmsMode: "SIMULATED_MOCK_HMS",
+    };
 
     const dbStatus = await checkDatabaseConnection();
     if (dbStatus.connected) {
@@ -99,7 +133,7 @@ export class AiOverflowService {
             targetStaffName: targetStaffName || null,
             ringDurationSeconds: ringDurationSeconds || null,
             handledByAi,
-            context: (context as any) || undefined,
+            context: { ...(context || {}), engineUsed, telemetry } as any,
             timestamp,
           },
         });
@@ -114,6 +148,8 @@ export class AiOverflowService {
           targetStaffName: record.targetStaffName,
           ringDurationSeconds: record.ringDurationSeconds,
           handledByAi: record.handledByAi,
+          engineUsed: ((record.context as any)?.engineUsed as ConversationalEngineType) || engineUsed,
+          telemetry: ((record.context as any)?.telemetry as AiOverflowTelemetry) || telemetry,
           context: record.context as Record<string, unknown> | null,
           timestamp: record.timestamp,
         };
@@ -133,6 +169,8 @@ export class AiOverflowService {
       targetStaffName: targetStaffName || null,
       ringDurationSeconds: ringDurationSeconds || null,
       handledByAi,
+      engineUsed,
+      telemetry,
       context: context || null,
       timestamp,
     };
@@ -164,6 +202,7 @@ export class AiOverflowService {
             targetStaffName: record.targetStaffName,
             ringDurationSeconds: record.ringDurationSeconds,
             handledByAi: record.handledByAi,
+            engineUsed: ((record.context as any)?.engineUsed as ConversationalEngineType) || "SARVAM_CORE_CUSTOM_FALLBACK",
             context: record.context as Record<string, unknown> | null,
             timestamp: record.timestamp,
           };
@@ -202,6 +241,7 @@ export class AiOverflowService {
           targetStaffName: r.targetStaffName,
           ringDurationSeconds: r.ringDurationSeconds,
           handledByAi: r.handledByAi,
+          engineUsed: ((r.context as any)?.engineUsed as ConversationalEngineType) || "SARVAM_CORE_CUSTOM_FALLBACK",
           context: r.context as Record<string, unknown> | null,
           timestamp: r.timestamp,
         }));
@@ -245,6 +285,7 @@ export class AiOverflowService {
           targetStaffName: r.targetStaffName,
           ringDurationSeconds: r.ringDurationSeconds,
           handledByAi: r.handledByAi,
+          engineUsed: ((r.context as any)?.engineUsed as ConversationalEngineType) || "SARVAM_CORE_CUSTOM_FALLBACK",
           context: r.context as Record<string, unknown> | null,
           timestamp: r.timestamp,
         }));
