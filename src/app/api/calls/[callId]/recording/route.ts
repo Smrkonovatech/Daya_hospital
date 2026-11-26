@@ -4,9 +4,6 @@ import path from "path";
 import { callsService } from "@/lib/services/calls-service";
 import { prisma, checkDatabaseConnection } from "@/lib/db/prisma";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 /**
  * Resolves local fallback audio file path based on language or intent.
  */
