@@ -19,6 +19,8 @@ import {
   Pause,
   RotateCcw,
   Sparkles,
+  Download,
+  AlertCircle,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { PageHeader } from "@/components/ui/page-header";
@@ -49,10 +51,14 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
   // Transcript search
   const [transcriptSearch, setTranscriptSearch] = React.useState("");
 
-  // Audio player state
+  // Real HTML5 Audio Player state
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = React.useState(false);
-  const [playbackProgress, setPlaybackProgress] = React.useState(0);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
   const [audioSpeed, setAudioSpeed] = React.useState(1);
+  const [audioError, setAudioError] = React.useState<string | null>(null);
+  const [isBuffering, setIsBuffering] = React.useState(false);
 
   // Staff Review Form
   const [reviewNotes, setReviewNotes] = React.useState("");
@@ -71,6 +77,7 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
           } else {
             setCall(data);
             setReviewNotes(data.followUpNotes || "");
+            setDuration(data.durationSeconds || 0);
           }
           setIsLoading(false);
         }
@@ -89,24 +96,43 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
     };
   }, [callId]);
 
-  // Audio simulation timer
-  React.useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    if (isPlaying) {
-      timer = setInterval(() => {
-        setPlaybackProgress((prev) => {
-          if (prev >= 100) {
-            setIsPlaying(false);
-            return 0;
-          }
-          return prev + 1.5 * audioSpeed;
-        });
-      }, 500);
+  const handleSpeedChange = (speed: number) => {
+    setAudioSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
     }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isPlaying, audioSpeed]);
+  };
+
+  const handleTogglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      setAudioError(null);
+      audioRef.current.play().catch((err) => {
+        console.error("Audio playback failure:", err);
+        setAudioError("Carrier audio stream unreachable or uncommitted.");
+      });
+    }
+  };
+
+  const handleResetAudio = () => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = 0;
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    const targetDuration = duration || call?.durationSeconds || 1;
+    const newTime = Math.max(0, Math.min(pos * targetDuration, targetDuration));
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
 
   const handleToggleReviewed = async () => {
     if (!call) return;
@@ -114,8 +140,8 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
     try {
       const updated = await callsService.updateCallReview(call.id, {
         isReviewed: !call.isReviewed,
-        reviewerName: "Dr. Anjali Menon",
-        reviewerId: "staff_anjali",
+        reviewerName: "Clinical Reviewer (Daya OPD)",
+        reviewerId: "staff_reviewer",
         notes: reviewNotes || (call.isReviewed ? "Marked as unreviewed" : "Marked as reviewed by staff"),
       });
       if (updated) {
@@ -147,8 +173,8 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
       const updated = await callsService.updateCallReview(call.id, {
         requiresFollowUp: newStatus,
         followUpStatus: newStatus ? "PENDING" : "RESOLVED",
-        reviewerName: "Dr. Anjali Menon",
-        reviewerId: "staff_anjali",
+        reviewerName: "Clinical Reviewer (Daya OPD)",
+        reviewerId: "staff_reviewer",
         notes: newStatus
           ? "Clinical follow-up requested by supervisor"
           : "Follow-up completed and resolved with patient",
@@ -380,7 +406,7 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
                 <span className="text-slate-500 font-medium">Telephony Provider:</span>
                 <div className="inline-flex items-center gap-1.5 font-semibold text-purple-800">
                   <Badge variant="outline" size="sm" className="bg-purple-50 text-purple-700 border-purple-200">
-                    {call.provider || "EXOTEL"}
+                    {call.provider === "EXOTEL" ? "IVR Provider" : call.provider || "IVR Provider"}
                   </Badge>
                   <span className="text-[10px] text-slate-500 font-normal">
                     ({call.direction === "OUTBOUND" ? "Outbound" : "Inbound"})
@@ -477,7 +503,7 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
                 </div>
               </div>
               <CardDescription className="text-xs">
-                Clinical synthesis generated by Smrko Voice Malayalam Engine
+                Clinical synthesis generated by SMRKO VOICE Intelligence Engine
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
@@ -664,12 +690,45 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
               </div>
             ) : (
               <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/70 p-4">
+                {/* HTML5 Audio Element for Real Telephony Streaming */}
+                <audio
+                  ref={audioRef}
+                  src={`/api/calls/${call.id}/recording`}
+                  preload="metadata"
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onWaiting={() => setIsBuffering(true)}
+                  onPlaying={() => setIsBuffering(false)}
+                  onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+                  onLoadedMetadata={() => {
+                    if (audioRef.current?.duration && !isNaN(audioRef.current.duration)) {
+                      setDuration(Math.round(audioRef.current.duration));
+                    }
+                  }}
+                  onEnded={() => {
+                    setIsPlaying(false);
+                    setCurrentTime(0);
+                  }}
+                  onError={() => {
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    setAudioError("Carrier audio stream unreachable or uncommitted.");
+                  }}
+                />
+
+                {audioError && (
+                  <div className="flex items-center gap-2 p-2 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+                    <span>{audioError} (Development fallback: passing ?fallback=sample streams verified test audio).</span>
+                  </div>
+                )}
+
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => setIsPlaying(!isPlaying)}
+                      onClick={handleTogglePlay}
                       className="h-9 w-9 rounded-full p-0 flex items-center justify-center shrink-0"
                       title={isPlaying ? "Pause" : "Play Recording"}
                     >
@@ -683,10 +742,7 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        setIsPlaying(false);
-                        setPlaybackProgress(0);
-                      }}
+                      onClick={handleResetAudio}
                       className="h-8 w-8 p-0 flex items-center justify-center text-slate-600"
                       title="Reset playback"
                     >
@@ -695,21 +751,25 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
 
                     <div className="text-xs space-y-0.5">
                       <p className="font-semibold text-slate-800">
-                        {isPlaying ? "Playing Inbound Voice Stream..." : "Ready for Secure Playback"}
+                        {isBuffering
+                          ? "Buffering Carrier Audio..."
+                          : isPlaying
+                          ? "Streaming Audio Recording (HTTP 206)..."
+                          : "Ready for Clinical Playback"}
                       </p>
                       <p className="text-[10px] text-slate-500 font-mono">
-                        Source: /api/calls/{call.id}/recording (Token Signed)
+                        Source: /api/calls/{call.id}/recording (PCM / WAV)
                       </p>
                     </div>
                   </div>
 
-                  {/* Speed Controls */}
-                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                  {/* Speed Controls & Download */}
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
                     <span className="text-[11px] text-slate-500 mr-1">Speed:</span>
                     {[1, 1.25, 1.5].map((speed) => (
                       <button
                         key={speed}
-                        onClick={() => setAudioSpeed(speed)}
+                        onClick={() => handleSpeedChange(speed)}
                         className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors cursor-pointer ${
                           audioSpeed === speed
                             ? "bg-[#0C5DB8] text-white"
@@ -719,24 +779,40 @@ export default function CallDetailClient({ callId }: CallDetailClientProps) {
                         {speed}x
                       </button>
                     ))}
+
+                    <a
+                      href={`/api/calls/${call.id}/recording?download=true`}
+                      download={`daya-call-${call.id}.wav`}
+                      className="ml-2 flex items-center gap-1 text-[11px] font-medium text-[#0C5DB8] hover:text-[#0a4d98] hover:underline"
+                      title="Download full audio recording (.wav)"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Download</span>
+                    </a>
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* Interactive scrub / progress bar */}
                 <div className="space-y-1">
-                  <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="w-full bg-slate-200 rounded-full h-2 overflow-hidden cursor-pointer relative"
+                    onClick={handleSeek}
+                    title="Click to seek"
+                  >
                     <div
-                      className="bg-[#0C5DB8] h-1.5 transition-all duration-300"
-                      style={{ width: `${playbackProgress}%` }}
+                      className="bg-[#0C5DB8] h-full transition-all duration-150"
+                      style={{
+                        width: `${
+                          (duration || call.durationSeconds) > 0
+                            ? Math.min(100, (currentTime / (duration || call.durationSeconds)) * 100)
+                            : 0
+                        }%`,
+                      }}
                     />
                   </div>
                   <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                    <span>
-                      {formatDuration(
-                        Math.floor((call.durationSeconds * playbackProgress) / 100)
-                      )}
-                    </span>
-                    <span>{formatDuration(call.durationSeconds)}</span>
+                    <span>{formatDuration(Math.floor(currentTime))}</span>
+                    <span>{formatDuration(duration || call.durationSeconds)}</span>
                   </div>
                 </div>
               </div>

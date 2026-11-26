@@ -72,9 +72,14 @@ export interface StandardBookingResponse {
     | "PATIENT_NOT_FOUND"
     | "DUPLICATE_IDEMPOTENCY"
     | "VPN_UNAVAILABLE"
-    | "VALIDATION_FAILED";
+    | "VALIDATION_FAILED"
+    | "HMS_UNAVAILABLE"
+    | "HMS_DISCONNECTED";
   error_message?: string;
   retry_after_ms?: number;
+  is_simulated?: boolean;
+  source?: "PRODUCTION_HMS" | "SIMULATED_MOCK_SANDBOX";
+  simulation_notice?: string;
 }
 
 export interface StandardRescheduleRequest {

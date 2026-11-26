@@ -72,7 +72,7 @@ export interface TenantVerificationResult {
 
 export interface ExotelPreFlightDecisionResult {
   decision: "CONNECT_HUMAN" | "CONNECT_VOICEBOT" | "CONNECT_EMERGENCY" | "AFTER_HOURS_TRANSFER" | "FAIL_CLOSED";
-  action: "DIAL" | "CONNECT_VOICEBOT" | "HANGUP";
+  action: "DIAL" | "CONNECT_VOICEBOT" | "HANGUP" | "REJECT";
   destinationNumber?: string;
   maxRingingDuration?: number;
   targetApplet?: string;
@@ -345,10 +345,31 @@ export class DynamicExotelRoutingAdapter {
     });
 
     if (!resolution.success || !resolution.destinationNumber) {
-      const statusCode = resolution.routingRule === "UNVERIFIED_TENANT_FAIL_CLOSED" ? 403 : 404;
+      const isEmergencyDisabled =
+        resolution.routingRule === "EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED";
+      const statusCode =
+        resolution.routingRule === "UNVERIFIED_TENANT_FAIL_CLOSED" || isEmergencyDisabled
+          ? 403
+          : 404;
+
+      const failHeaders: Record<string, string> = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-SMRKOMED-Tenant": resolution.hospitalId,
+        "X-SMRKOMED-Escalation": resolution.escalationType,
+        "X-SMRKOMED-Version": String(resolution.versionUsed),
+        "X-SMRKOMED-Routing-Rule": resolution.routingRule,
+      };
+
+      if (resolution.receiverClassification) {
+        failHeaders["X-SMRKOMED-Receiver-Classification"] = resolution.receiverClassification;
+      }
+      if (isEmergencyDisabled) {
+        failHeaders["X-SMRKOMED-Emergency-PSTN-Transfer"] = "DISABLED_FAIL_CLOSED";
+      }
+
       return {
         statusCode,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: failHeaders,
         jsonPayload: {
           error: resolution.routingRule || "UNVERIFIED_DESTINATION",
           message: resolution.error || "Destination could not be verified or is unapproved demo data.",
@@ -457,6 +478,23 @@ export class DynamicExotelRoutingAdapter {
     // 1. CANONICAL DTMF 1: EMERGENCY
     // Always bypasses receptionist and AI overflow; routes directly to emergency destination
     if (normalizedMenuChoice === "1" || normalizedMenuChoice === "emergency") {
+      const emergencyPstnEnabled =
+        publishedConfig.emergencyDestination.emergencyPstnTransferEnabled === true;
+
+      // CRITICAL SAFETY GUARD (Phase 10.14):
+      // If emergency PSTN transfer is disabled, fail closed.
+      // Do NOT silently redirect emergency callers to AI.
+      if (!emergencyPstnEnabled) {
+        return {
+          decision: "FAIL_CLOSED",
+          action: "REJECT",
+          hospitalId,
+          versionUsed,
+          reason:
+            "Canonical DTMF 1: Emergency live PSTN transfer is disabled for this tenant. Development test receiver cannot be dialed over live PSTN.",
+        };
+      }
+
       const emergencyDest = publishedConfig.emergencyDestination.primaryNumber;
       return {
         decision: "CONNECT_EMERGENCY",

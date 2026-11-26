@@ -29,7 +29,7 @@ export function SarvamSyncStatusCard({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-xs font-semibold text-slate-900">
-                Smrko Voice Agent Synchronization
+                SMRKO VOICE Knowledge Synchronization
               </h3>
               <Badge
                 variant={isConfigured ? "success" : "warning"}
@@ -57,7 +57,7 @@ export function SarvamSyncStatusCard({
             className="h-8 gap-1.5 text-xs bg-[#0C5DB8] hover:bg-[#0A4D98] text-white shrink-0"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
-            <span>{isSyncing ? "Checking Sync Adapter..." : "Sync with Voice Agent"}</span>
+            <span>{isSyncing ? "Checking Sync Adapter..." : "Sync with SMRKO VOICE"}</span>
           </Button>
         </div>
       </div>
@@ -67,7 +67,7 @@ export function SarvamSyncStatusCard({
         <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
         <div className="space-y-0.5 flex-1">
           <p>
-            <strong>Sync Interface Architecture:</strong> Real Smrko Voice LLM knowledge upload endpoint is cleanly decoupled. In Demo Mode, articles are safely stored in Daya&apos;s local database without issuing false sync confirmations.
+            <strong>Sync Interface Architecture:</strong> SMRKO VOICE knowledge grounding interface is cleanly decoupled. In Demo Mode, articles are safely stored in Daya&apos;s local database without issuing false sync confirmations.
           </p>
           {syncResult && (
             <p className="text-slate-500 pt-0.5 font-mono text-[10px]">

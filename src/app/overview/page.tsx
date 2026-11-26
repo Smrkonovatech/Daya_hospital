@@ -27,14 +27,14 @@ import { overviewService, OverviewDashboardData } from "@/lib/services/overview-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-/** Figma values used until the service responds */
-const DESIGN_DEFAULTS = {
-  callsOffered: 1248,
-  callsAnswered: 1184,
-  callsCompleted: 1042,
-  appointmentsBooked: 312,
-  transferredToStaff: 142,
-  requiresFollowUp: 38,
+/** Initial metric baseline until service responds */
+const INITIAL_METRICS = {
+  callsOffered: 0,
+  callsAnswered: 0,
+  callsCompleted: 0,
+  appointmentsBooked: 0,
+  transferredToStaff: 0,
+  requiresFollowUp: 0,
 };
 
 const ACTION_LABELS: Record<string, [string, string]> = {
@@ -45,12 +45,12 @@ const ACTION_LABELS: Record<string, [string, string]> = {
   CANCEL_APPOINTMENT: ["Cancel", "Appointment"],
 };
 const ACTION_COLORS = ["#866be3", "#c178f5", "#209bb2", "#ffa75d", "#0388bd"];
-const DESIGN_ACTION_BARS: ActionBar[] = [
-  { label: ["Book", "Appointment"], value: 312, color: ACTION_COLORS[0] },
-  { label: ["Doctor Slot", "Search"], value: 450, color: ACTION_COLORS[1] },
-  { label: ["Reschedule", "Appointment"], value: 118, color: ACTION_COLORS[2] },
-  { label: ["Staff", "Transfer"], value: 142, color: ACTION_COLORS[3] },
-  { label: ["Cancel", "Appointment"], value: 48, color: ACTION_COLORS[4] },
+const DEFAULT_ACTION_BARS: ActionBar[] = [
+  { label: ["Book", "Appointment"], value: 0, color: ACTION_COLORS[0] },
+  { label: ["Doctor Slot", "Search"], value: 0, color: ACTION_COLORS[1] },
+  { label: ["Reschedule", "Appointment"], value: 0, color: ACTION_COLORS[2] },
+  { label: ["Staff", "Transfer"], value: 0, color: ACTION_COLORS[3] },
+  { label: ["Cancel", "Appointment"], value: 0, color: ACTION_COLORS[4] },
 ];
 
 const ALERTS: AlertItem[] = [
@@ -101,9 +101,9 @@ export default function OverviewPage() {
     return fetchOverview(range);
   }, [fetchOverview, range]);
 
-  const m = data?.metrics ?? DESIGN_DEFAULTS;
+  const m = data?.metrics ?? INITIAL_METRICS;
   const dropped = Math.max(0, m.callsOffered - m.callsAnswered);
-  const aiHandlingRate = m.callsOffered > 0 ? Math.round((m.callsCompleted / m.callsOffered) * 100) : 84;
+  const aiHandlingRate = m.callsOffered > 0 ? Math.round((m.callsCompleted / m.callsOffered) * 100) : 0;
 
   const bars: ActionBar[] = data?.actionDistribution?.length
     ? data.actionDistribution.slice(0, 5).map((a, i) => ({
@@ -111,7 +111,7 @@ export default function OverviewPage() {
       value: a.count,
       color: ACTION_COLORS[i % ACTION_COLORS.length],
     }))
-    : DESIGN_ACTION_BARS;
+    : DEFAULT_ACTION_BARS;
 
   return (
       <DashboardLayout

@@ -35,12 +35,12 @@ export interface PaginatedCallsResult {
   isDemoData: boolean;
 }
 
-// In-memory fallback store initialized with realistic hospital records
+// In-memory fallback store initialized with realistic hospital test records
 const inMemoryCalls: CallRecord[] = [
   ...MOCK_CALL_RECORDS.map((c, index) => ({
     ...c,
     isReviewed: index % 3 === 0,
-    reviewedBy: index % 3 === 0 ? "Dr. Anjali Menon" : undefined,
+    reviewedBy: index % 3 === 0 ? "Clinical Reviewer (OPD)" : undefined,
     reviewedAt: index % 3 === 0 ? "2026-10-27T11:15:00+05:30" : undefined,
     reviewHistory:
       index % 3 === 0
@@ -48,7 +48,7 @@ const inMemoryCalls: CallRecord[] = [
             {
               id: `rev_${c.id}_01`,
               reviewerId: "usr_daya_01",
-              reviewerName: "Dr. Anjali Menon",
+              reviewerName: "Clinical Reviewer (OPD)",
               action: "REVIEWED" as const,
               notes: "Clinical triage and Malayalam audio verified accurate.",
               timestamp: "2026-10-27T11:15:00+05:30",

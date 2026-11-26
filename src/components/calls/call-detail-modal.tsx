@@ -12,6 +12,8 @@ import {
   Play,
   Pause,
   RotateCcw,
+  Download,
+  AlertCircle,
 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
@@ -37,10 +39,53 @@ function CallDetailInner({
   onUpdateFollowUp?: (callId: string, notes: string, resolved: boolean) => void;
 }) {
   const [revealPhone, setRevealPhone] = React.useState(false);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(call.durationSeconds || 0);
   const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
+  const [audioError, setAudioError] = React.useState<string | null>(null);
+  const [isBuffering, setIsBuffering] = React.useState(false);
   const [showMalayalamText, setShowMalayalamText] = React.useState(true);
   const [notes, setNotes] = React.useState(call.followUpNotes || "");
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
+  };
+
+  const handleTogglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      setAudioError(null);
+      audioRef.current.play().catch((err) => {
+        console.error("Playback error:", err);
+        setAudioError("Carrier audio stream unreachable or uncommitted.");
+      });
+    }
+  };
+
+  const handleReset = () => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = 0;
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    const targetDuration = duration || call.durationSeconds || 1;
+    const newTime = Math.max(0, Math.min(pos * targetDuration, targetDuration));
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
 
   return (
     <div className="space-y-5">
@@ -90,7 +135,7 @@ function CallDetailInner({
           <div className="text-[10px] text-slate-400 font-medium">Telephony Provider</div>
           <div className="font-semibold text-slate-900 mt-0.5 flex items-center gap-1.5">
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-              {call.provider || "EXOTEL"}
+              {call.provider === "EXOTEL" ? "IVR Provider" : call.provider || "IVR Provider"}
             </span>
             <span className="text-[10px] text-slate-500 font-normal">
               {call.direction === "OUTBOUND" ? "Outbound" : "Inbound"}
@@ -99,13 +144,49 @@ function CallDetailInner({
         </div>
       </div>
 
-      {/* Audio Player Simulator */}
+      {/* Real HTML5 Audio Player */}
       <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+        <audio
+          ref={audioRef}
+          src={`/api/calls/${call.id}/recording`}
+          preload="metadata"
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => setIsBuffering(false)}
+          onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+          onLoadedMetadata={() => {
+            if (audioRef.current?.duration && !isNaN(audioRef.current.duration)) {
+              setDuration(Math.round(audioRef.current.duration));
+            }
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+          onError={() => {
+            setIsPlaying(false);
+            setIsBuffering(false);
+            setAudioError("Carrier audio recording stream unreachable or uncommitted.");
+          }}
+        />
+
+        {audioError && (
+          <div className="flex items-center gap-2 p-2 mb-2 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <span>{audioError}</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between text-xs mb-2">
           <div className="flex items-center gap-2">
             <Volume2 className="h-4 w-4 text-[#0C5DB8]" />
             <span className="font-semibold text-slate-800">
-              Encrypted Audio Recording (Voice AI Telephony)
+              {isBuffering
+                ? "Buffering Carrier Audio..."
+                : isPlaying
+                ? "Streaming Voice Recording (HTTP 206)"
+                : "Call Voice Recording"}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -113,8 +194,8 @@ function CallDetailInner({
             {[1, 1.25, 1.5].map((speed) => (
               <button
                 key={speed}
-                onClick={() => setPlaybackSpeed(speed)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                onClick={() => handleSpeedChange(speed)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${
                   playbackSpeed === speed
                     ? "bg-[#0C5DB8] text-white"
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -123,6 +204,15 @@ function CallDetailInner({
                 {speed}x
               </button>
             ))}
+
+            <a
+              href={`/api/calls/${call.id}/recording?download=true`}
+              download={`daya-call-${call.id}.wav`}
+              className="ml-1 text-slate-400 hover:text-[#0C5DB8]"
+              title="Download call audio (.wav)"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </a>
           </div>
         </div>
 
@@ -131,29 +221,39 @@ function CallDetailInner({
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => setIsPlaying(!isPlaying)}
+            onClick={handleTogglePlay}
             className="h-8 w-8 text-[#0C5DB8]"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
           </Button>
 
           <div className="flex-1">
-            <div className="relative h-2 w-full rounded-full bg-slate-100 overflow-hidden cursor-pointer">
+            <div
+              className="relative h-2 w-full rounded-full bg-slate-100 overflow-hidden cursor-pointer"
+              onClick={handleSeek}
+              title="Click to seek"
+            >
               <div
                 className="h-full bg-[#0C5DB8] transition-all"
-                style={{ width: isPlaying ? "65%" : "30%" }}
+                style={{
+                  width: `${
+                    (duration || call.durationSeconds) > 0
+                      ? Math.min(100, (currentTime / (duration || call.durationSeconds)) * 100)
+                      : 0
+                  }%`,
+                }}
               />
             </div>
-            <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-              <span>{isPlaying ? "01:32" : "00:42"}</span>
-              <span>{formatDuration(call.durationSeconds)}</span>
+            <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
+              <span>{formatDuration(Math.floor(currentTime))}</span>
+              <span>{formatDuration(duration || call.durationSeconds)}</span>
             </div>
           </div>
 
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => setIsPlaying(false)}
+            onClick={handleReset}
             className="h-8 w-8 text-slate-400 hover:text-slate-700"
             title="Restart audio"
           >

@@ -250,14 +250,14 @@ export class HospitalRoutingService {
         isVerified: true,
         verificationStatus: "VERIFIED_LIVE",
         emergencyDestination: {
-          primaryNumber: "+919606654032",
+          primaryNumber: "+919740662046",
           backupNumber: "+914872475100",
           departmentName: "Casualty Emergency Desk (DEV TEST RECEIVER)",
           extension: "100",
           receiverClassification: "TEMPORARY_DEV_TEST_RECEIVER",
           emergencyPstnTransferEnabled: false,
           verificationNotes:
-            "RECLASSIFIED PER PHASE 10.8: Strictly temporary development test receiver. Live carrier emergency PSTN transfer disabled pending Daya hospital clinical signoff.",
+            "RECLASSIFIED PER PHASE 10.13: Strictly temporary development test receiver (+919740662046). Live carrier emergency PSTN transfer disabled pending Daya hospital clinical signoff.",
         },
         receptionistDestination: {
           primaryNumber: "+919606654032",
@@ -1233,7 +1233,33 @@ export class HospitalRoutingService {
 
     // 1. EMERGENCY Escalation (Bypasses business hours and AI overflow)
     if (escalationType === "EMERGENCY" || escalationType === "EMERGENCY_TRANSFER") {
+      const emergencyPstnEnabled = config.emergencyDestination.emergencyPstnTransferEnabled === true;
       const destNumber = config.emergencyDestination.primaryNumber;
+
+      // CRITICAL SAFETY GUARD (Phase 10.14):
+      // When emergencyPstnTransferEnabled=false, do NOT return a dialable emergency destination over PSTN.
+      // Fail closed immediately so Exotel takes the documented Failed branch.
+      // Do NOT silently redirect emergency callers to AI.
+      if (!emergencyPstnEnabled) {
+        return {
+          success: false,
+          hospitalId: config.hospitalId,
+          escalationType: "EMERGENCY",
+          destinationNumber: "",
+          departmentName: config.emergencyDestination.departmentName || "Casualty Department",
+          versionUsed,
+          isAfterHours: false, // Emergency always bypasses after-hours
+          routingRule: "EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED",
+          ringTimeoutSeconds: 0,
+          aiOverflowEnabled: false, // Strict: Never redirect emergency callers to AI
+          receiverClassification:
+            config.emergencyDestination.receiverClassification || "TEMPORARY_DEV_TEST_RECEIVER",
+          emergencyPstnTransferEnabled: false,
+          error:
+            "EMERGENCY_PSTN_TRANSFER_DISABLED: Live carrier emergency PSTN transfer is disabled for this tenant. Development test receiver cannot be dialed over live PSTN.",
+        };
+      }
+
       return {
         success: Boolean(destNumber && isValidE164(destNumber)),
         hospitalId: config.hospitalId,
@@ -1250,8 +1276,7 @@ export class HospitalRoutingService {
         aiOverflowEnabled: false,
         receiverClassification:
           config.emergencyDestination.receiverClassification || "TEMPORARY_DEV_TEST_RECEIVER",
-        emergencyPstnTransferEnabled:
-          config.emergencyDestination.emergencyPstnTransferEnabled ?? false,
+        emergencyPstnTransferEnabled: true,
       };
     }
 

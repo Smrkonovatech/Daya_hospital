@@ -58,13 +58,17 @@ class IntegrationRegistry {
     const isSarvamProd = Boolean(process.env.SARVAM_API_KEY && process.env.SARVAM_AGENT_ID);
     const isIvrProd = Boolean(process.env.TELEPHONY_SIP_GATEWAY && process.env.TELEPHONY_API_KEY);
 
-    this.hmsAdapter = isHmsProd ? new DayaHmsClient() : new MockDayaHmsAdapter();
+    // Real client enforced by default: mock adapters accessible ONLY in explicit simulation mode
+    this.hmsAdapter = new DayaHmsClient();
     this.sarvamAdapter = isSarvamProd ? new SarvamVoiceClient() : new MockSarvamVoiceAdapter();
     this.ivrAdapter = isIvrProd ? new TelephonyIvrClient() : new MockTelephonyIvrAdapter();
     this.exotelAdapter = new ExotelTelephonyAdapter();
   }
 
-  getHmsAdapter(): IDayaHmsAdapter {
+  getHmsAdapter(simulationMode?: boolean): IDayaHmsAdapter {
+    if (simulationMode) {
+      return new MockDayaHmsAdapter();
+    }
     return this.hmsAdapter;
   }
 

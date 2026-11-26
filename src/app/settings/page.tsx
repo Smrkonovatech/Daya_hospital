@@ -403,10 +403,10 @@ export default function SettingsPage() {
             <TabsTrigger value="notifications">Notifications & Alerts</TabsTrigger>
             <TabsTrigger value="privacy">Call Recording & Privacy</TabsTrigger>
             <TabsTrigger value="status">System Status & Gateways</TabsTrigger>
-            <TabsTrigger value="telephony">Telephony Provider (Exotel)</TabsTrigger>
+            <TabsTrigger value="telephony">Telephony Configuration</TabsTrigger>
             <TabsTrigger value="routing">Dynamic Call Routing</TabsTrigger>
-            <TabsTrigger value="voice_agents">Voice Agents (Samvaad)</TabsTrigger>
-            <TabsTrigger value="ai_provider">AI Provider (Sarvam)</TabsTrigger>
+            <TabsTrigger value="voice_agents">Voice Agent Deployments</TabsTrigger>
+            <TabsTrigger value="ai_provider">SMRKO VOICE Engine</TabsTrigger>
             <TabsTrigger value="business">Business Hours & Escalation</TabsTrigger>
             <TabsTrigger value="versions">Configuration Versions</TabsTrigger>
           </TabsList>
@@ -971,24 +971,24 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Gateway 3: IVR & Exotel Telephony */}
+                  {/* Gateway 3: IVR & Telephony */}
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Radio className="h-4 w-4 text-sky-600" />
                         <span className="font-bold text-slate-900">
-                          Hospital Telephony Provider: Exotel Cloud & AgentStream
+                          Hospital Telephony Provider: IVR Carrier & AgentStream
                         </span>
                       </div>
-                      <Badge variant="teal">Connected (Exotel Cloud)</Badge>
+                      <Badge variant="teal">Connected (Carrier Cloud)</Badge>
                     </div>
                     <p className="text-slate-500 text-[11px]">
-                      Routes incoming patient phone calls and outbound reminders via Exotel Cloud Telephony. Real-time audio streaming is orchestrated via the persistent Smrko Voice Media Gateway WebSocket.
+                      Routes incoming patient phone calls and outbound reminders via Cloud Telephony. Real-time audio streaming is orchestrated via the persistent SMRKO VOICE Media Gateway WebSocket.
                     </p>
                     <div className="flex items-center gap-4 text-[11px] text-slate-600 font-mono pt-1 flex-wrap">
-                      <span>ExoPhone: +91 487 2475000</span>
+                      <span>Hospital Inbound Virtual Line: +91 487 2475000</span>
                       <span>Audio Codec: PCM 16-bit 8000Hz</span>
-                      <span>Gateway: wss://voice.smrkomed.com/exotel/voicebot</span>
+                      <span>Gateway: wss://voice.smrkomed.com/media-gateway/voicebot</span>
                       <span className="text-emerald-700 font-semibold">Capacity: 30 Concurrent Trunks</span>
                     </div>
                   </div>
@@ -1042,28 +1042,28 @@ export default function SettingsPage() {
             </div>
           </TabsContent>
 
-          {/* TAB 6: TELEPHONY PROVIDER (EXOTEL) */}
+          {/* TAB 6: TELEPHONY CONFIGURATION */}
           <TabsContent value="telephony">
             <div className="space-y-5">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <Radio className="h-4 w-4 text-[#0C5DB8]" />
-                    <span>Exotel Telephony Cloud Integration</span>
+                    <span>Hospital Telephony Configuration (IVR Provider)</span>
                   </CardTitle>
                   <CardDescription>
-                    Official Exotel Singapore region (api.exotel.com) connectivity for Daya Hospital.
+                    Official IVR carrier and cloud telephony connectivity for Daya Hospital.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 text-xs">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-                      <span className="text-slate-500 font-medium">Account SID</span>
+                      <span className="text-slate-500 font-medium">Carrier Account SID</span>
                       <p className="font-mono font-bold text-slate-900">smrkonova1</p>
                       <span className="text-[10px] text-slate-400">Singapore Region (api.exotel.com)</span>
                     </div>
                     <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5">
-                      <span className="text-slate-500 font-medium">Primary Virtual ExoPhone</span>
+                      <span className="text-slate-500 font-medium">Hospital Inbound Virtual Line</span>
                       <p className="font-mono font-bold text-slate-900">08047291658</p>
                       <span className="text-[10px] text-emerald-600 font-medium">● Connected & Active</span>
                     </div>
@@ -1113,14 +1113,14 @@ export default function SettingsPage() {
             <SarvamVoiceAgentSettings />
           </TabsContent>
 
-          {/* TAB 7: AI PROVIDER (SARVAM) */}
+          {/* TAB 7: AI PROVIDER */}
           <TabsContent value="ai_provider">
             <div className="space-y-5">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-[#0C5DB8]" />
-                    <span>Sarvam AI Speech & Conversational Stack</span>
+                    <span>SMRKO VOICE Engine & Conversational Stack</span>
                   </CardTitle>
                   <CardDescription>
                     Authoritative AI stack powering real-time Malayalam & Indian English voice reception.

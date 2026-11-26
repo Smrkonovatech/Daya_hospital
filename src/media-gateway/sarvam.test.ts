@@ -240,7 +240,7 @@ describe("HospitalConversationEngine (Daya Hospital Malayalam Persona)", () => {
         expect(result.shouldTransfer).toBe(true);
         expect(result.transferDestination).toBe("100");
         expect(result.replyText).toContain("കാഷ്വാലിറ്റി");
-        expect(result.replyText).toContain("9606654032");
+        expect(result.replyText).toContain(DAYA_HOSPITAL_CONFIG.routing.casualtyDirectNumber || "9740662046");
       }
     } finally {
       process.env.HOSPITAL_DESTINATIONS_CONFIRMED = origEnv;

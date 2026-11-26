@@ -66,8 +66,8 @@ export function InitiateCallDialog({ isOpen, onClose, onCallInitiated }: Initiat
       setSuccessSid(sid);
       showToast({
         type: "success",
-        title: "AI Call Dispatched via Exotel",
-        message: `Exotel Call SID: ${sid}. Connected to Flow 1393239.`,
+        title: "AI Call Dispatched via Telephony Carrier",
+        message: `Call SID: ${sid}. Connected to Voice Agent Flow.`,
       });
 
       if (onCallInitiated) {
@@ -99,7 +99,7 @@ export function InitiateCallDialog({ isOpen, onClose, onCallInitiated }: Initiat
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Initiate AI Telephone Call via Exotel" maxWidth="md">
+    <Modal isOpen={isOpen} onClose={handleClose} title="Initiate SMRKO VOICE Outbound Call" maxWidth="md">
       {successSid ? (
         <div className="py-6 px-4 text-center space-y-4">
           <div className="mx-auto w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
@@ -108,11 +108,11 @@ export function InitiateCallDialog({ isOpen, onClose, onCallInitiated }: Initiat
           <div className="space-y-1">
             <h3 className="text-base font-semibold text-slate-900">Call Dispatched Successfully</h3>
             <p className="text-xs text-slate-500">
-              Exotel is currently dialing the patient. Once answered, the Smrkomed Voicebot will execute the Daya Hospital Malayalam conversation flow.
+              The telephony carrier is dialing the patient. Once answered, SMRKO VOICE will execute the Daya Hospital Malayalam conversation flow.
             </p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3 border border-slate-200 text-xs font-mono text-slate-700">
-            <span className="text-slate-400">Exotel Call SID: </span>
+            <span className="text-slate-400">Call SID: </span>
             <span className="font-semibold text-[#0C5DB8]">{successSid}</span>
           </div>
           <div className="pt-2 flex justify-center gap-2">

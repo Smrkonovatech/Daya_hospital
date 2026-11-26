@@ -5,10 +5,10 @@ import {
   ActionReviewEntry,
   ActionWebhookEvent,
 } from "@/types";
-import { MockDayaHmsAdapter } from "@/lib/integrations/hms/mock-adapter";
+import { DayaHmsClient } from "@/lib/integrations/hms/hms-client";
 import { maskPhoneNumber } from "@/lib/utils";
 
-const hmsAdapter = new MockDayaHmsAdapter();
+const hmsClient = new DayaHmsClient();
 
 export interface ActionFilterParams {
   searchQuery?: string;
@@ -827,8 +827,17 @@ export class ActionsService {
       };
     }
 
-    // Call Authoritative HMS Adapter
-    const hmsCheck = await hmsAdapter.verifyBooking(current.hmsBookingRef);
+    // Enforce real HMS verification contract: do not silently mock verification when real HMS is offline
+    if (!hmsClient.getSimulationMode()) {
+      return {
+        success: false,
+        action: current,
+        message: "Live Daya HMS is currently offline (site-to-site VPN pending). Re-verification failed closed without simulating false confirmation.",
+      };
+    }
+
+    // Call Authoritative HMS Client in simulation mode
+    const hmsCheck = await hmsClient.verifyBooking(current.hmsBookingRef);
 
     const newHistory: ActionReviewEntry[] = [...(current.reviewHistory || [])];
 

@@ -145,8 +145,14 @@ export interface BookAppointmentResult {
     | "HMS_TIMEOUT"
     | "PATIENT_NOT_FOUND"
     | "DUPLICATE_IDEMPOTENCY"
-    | "VALIDATION_FAILED";
+    | "VALIDATION_FAILED"
+    | "HMS_UNAVAILABLE"
+    | "HMS_DISCONNECTED";
   retryAfterMs?: number;
+  isSimulated?: boolean;
+  source?: "LIVE_HMS" | "SIMULATED_MOCK_SANDBOX";
+  simulationNotice?: string;
+  hmsStatus?: "CONNECTED" | "DISCONNECTED" | "DOWN";
 }
 
 export interface RescheduleAppointmentInput {

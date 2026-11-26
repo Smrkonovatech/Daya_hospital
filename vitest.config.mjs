@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+      'vitest': path.resolve(import.meta.dirname, './src/test-globals.ts'),
     },
   },
 });

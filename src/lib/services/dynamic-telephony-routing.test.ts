@@ -44,12 +44,14 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
   beforeAll(async () => {
     await hospitalRoutingService.purgeTenantState(TEST_TENANT);
     await hospitalRoutingService.purgeTenantState("hosp_invalid_phone_test");
+    await hospitalRoutingService.purgeTenantState("hosp_daya_thrissur");
     hospitalRoutingService.resetInMemoryState();
   });
 
   afterAll(async () => {
     await hospitalRoutingService.purgeTenantState(TEST_TENANT);
     await hospitalRoutingService.purgeTenantState("hosp_invalid_phone_test");
+    await hospitalRoutingService.purgeTenantState("hosp_daya_thrissur");
     hospitalRoutingService.resetInMemoryState();
   });
 
@@ -62,23 +64,33 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
   // 1. Multi-Tenant Destination Resolution Across Distinct Tenants
   // --------------------------------------------------------------------------
   it("1. Multi-Tenant Resolution: Resolves distinct isolated destinations for Daya, Aster, and KIMS", async () => {
-    // Daya Hospital (Live Verified)
+    // Daya Hospital (Live Verified Receptionist)
     const dayaRes = await hospitalRoutingService.resolveLiveDestination({
       hospitalId: "hosp_daya_thrissur",
-      escalationType: "EMERGENCY",
+      escalationType: "HUMAN_TRANSFER",
       isLiveCall: false,
     });
     expect(dayaRes.success).toBe(true);
     expect(dayaRes.destinationNumber).toBe("+919606654032");
 
-    // Aster Medcity
-    const asterRes = await hospitalRoutingService.resolveLiveDestination({
-      hospitalId: "hosp_aster_medcity",
+    // Daya Hospital Emergency Transfer (Fails closed while disabled per Phase 10.14)
+    const dayaEmRes = await hospitalRoutingService.resolveLiveDestination({
+      hospitalId: "hosp_daya_thrissur",
       escalationType: "EMERGENCY",
       isLiveCall: false,
     });
+    expect(dayaEmRes.success).toBe(false);
+    expect(dayaEmRes.destinationNumber).toBe("");
+    expect(dayaEmRes.routingRule).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+
+    // Aster Medcity
+    const asterRes = await hospitalRoutingService.resolveLiveDestination({
+      hospitalId: "hosp_aster_medcity",
+      escalationType: "HUMAN_TRANSFER",
+      isLiveCall: false,
+    });
     expect(asterRes.success).toBe(true);
-    expect(asterRes.destinationNumber).toBe("+914846699999");
+    expect(asterRes.destinationNumber).toBe("+914846699000");
     expect(asterRes.destinationNumber).not.toBe(dayaRes.destinationNumber);
 
     // KIMSHEALTH Trivandrum
@@ -485,30 +497,67 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
   });
 
   // --------------------------------------------------------------------------
-  // 14. Dedicated EMERGENCY_TRANSFER Resolution Contract
+  // 14. Dedicated EMERGENCY_TRANSFER Resolution Contract & Safety Guard
   // --------------------------------------------------------------------------
-  it("14. Emergency Contract: Dedicated EMERGENCY_TRANSFER contract resolves primary emergency destination dynamically", async () => {
-    // Daya Hospital Emergency Transfer
-    const dayaEmergency = await hospitalRoutingService.resolveLiveDestination({
+  it("14. Emergency Contract: Dedicated EMERGENCY_TRANSFER contract fails closed when transfer is disabled, and resolves when authorized", async () => {
+    // State A: Emergency Transfer disabled (Default Safety State per Phase 10.14)
+    const dayaEmergencyDisabled = await hospitalRoutingService.resolveLiveDestination({
       hospitalId: "hosp_daya_thrissur",
       escalationType: "EMERGENCY_TRANSFER",
       isLiveCall: false,
     });
-    expect(dayaEmergency.success).toBe(true);
-    expect(dayaEmergency.destinationNumber).toBe("+919606654032");
-    expect(dayaEmergency.routingRule).toBe("EMERGENCY_TRANSFER_DIRECT_ROUTING");
-    expect(dayaEmergency.isAfterHours).toBe(false); // Always bypasses after-hours
-    expect(dayaEmergency.aiOverflowEnabled).toBe(false); // Bypasses AI overflow
+    expect(dayaEmergencyDisabled.success).toBe(false);
+    expect(dayaEmergencyDisabled.destinationNumber).toBe("");
+    expect(dayaEmergencyDisabled.routingRule).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+    expect(dayaEmergencyDisabled.aiOverflowEnabled).toBe(false);
 
-    // Exotel Connect Applet resolves EMERGENCY_TRANSFER via authenticated token
+    // Exotel Connect Applet receives HTTP 403 and destination: null (Never dials PSTN while disabled)
     const emergencyReq = new NextRequest(
       "https://gateway.smrkomed.com/api/v1/telephony/routing/destination?CallSid=call_emergency_contract_test&hospitalId=hosp_daya_thrissur&type=EMERGENCY_TRANSFER&token=smrko_test_routing_token_2026"
     );
     const emergencyRes = await handleCanonicalDestination(emergencyReq);
-    expect(emergencyRes.status).toBe(200);
+    expect(emergencyRes.status).toBe(403);
     const emergencyJson = await emergencyRes.json();
-    expect(emergencyJson.destination.numbers).toEqual(["+919606654032"]);
-    expect(emergencyJson.max_ringing_duration).toBe(25);
+    expect(emergencyJson.destination).toBeNull();
+    expect(emergencyJson.error).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+    expect(emergencyRes.headers.get("X-SMRKOMED-Emergency-PSTN-Transfer")).toBe("DISABLED_FAIL_CLOSED");
+
+    // State B: When explicitly authorized by clinical admin (emergencyPstnTransferEnabled: true)
+    await hospitalRoutingService.saveDraft("hosp_daya_thrissur", {
+      emergencyDestination: {
+        primaryNumber: "+919740662046",
+        departmentName: "Casualty Emergency Desk",
+        emergencyPstnTransferEnabled: true,
+      },
+    });
+    await hospitalRoutingService.publishVersion("hosp_daya_thrissur", "Authorized clinical emergency trunk");
+
+    const dayaEmergencyEnabled = await hospitalRoutingService.resolveLiveDestination({
+      hospitalId: "hosp_daya_thrissur",
+      escalationType: "EMERGENCY_TRANSFER",
+      isLiveCall: false,
+    });
+    expect(dayaEmergencyEnabled.success).toBe(true);
+    expect(dayaEmergencyEnabled.destinationNumber).toBe("+919740662046");
+    expect(dayaEmergencyEnabled.routingRule).toBe("EMERGENCY_TRANSFER_DIRECT_ROUTING");
+
+    const authReq = new NextRequest(
+      "https://gateway.smrkomed.com/api/v1/telephony/routing/destination?CallSid=call_emergency_auth_test&hospitalId=hosp_daya_thrissur&type=EMERGENCY_TRANSFER&token=smrko_test_routing_token_2026"
+    );
+    const authRes = await handleCanonicalDestination(authReq);
+    expect(authRes.status).toBe(200);
+    const authJson = await authRes.json();
+    expect(authJson.destination.numbers).toEqual(["+919740662046"]);
+
+    // Restore disabled safety baseline
+    await hospitalRoutingService.saveDraft("hosp_daya_thrissur", {
+      emergencyDestination: {
+        primaryNumber: "+919740662046",
+        departmentName: "Casualty Emergency Desk (DEV TEST RECEIVER)",
+        emergencyPstnTransferEnabled: false,
+      },
+    });
+    await hospitalRoutingService.publishVersion("hosp_daya_thrissur", "Restore emergency transfer disabled safety baseline");
   });
 
   // --------------------------------------------------------------------------
@@ -636,17 +685,16 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
     await hospitalRoutingService.saveDraft("hosp_daya_thrissur", { aiOverflowEnabled: true });
     await hospitalRoutingService.publishVersion("hosp_daya_thrissur", "Published Daya DTMF baseline");
 
-    // Option 1: Press 1 (Emergency) -> Direct dial to casualty triage, bypasses receptionist and AI
+    // Option 1: Press 1 (Emergency) -> When transfer disabled, fails closed immediately (bypasses receptionist and AI)
     const dtmf1 = await dynamicExotelRoutingAdapter.evaluatePreFlightDecision({
       callSid: "call_dtmf1_emergency",
       hospitalId: "hosp_daya_thrissur",
       menuChoice: "1",
       isInternalAuthorized: true,
     });
-    expect(dtmf1.decision).toBe("CONNECT_EMERGENCY");
-    expect(dtmf1.action).toBe("DIAL");
-    expect(dtmf1.destinationNumber).toBe("+919606654032");
-    expect(dtmf1.reason).toContain("Canonical DTMF 1: Emergency selected");
+    expect(dtmf1.decision).toBe("FAIL_CLOSED");
+    expect(dtmf1.action).toBe("REJECT");
+    expect(dtmf1.reason).toContain("Emergency live PSTN transfer is disabled");
 
     // Option 2: Press 2 (Appointment) -> Human receptionist first -> Sarvam AI on busy/offline
     const dtmf2 = await dynamicExotelRoutingAdapter.evaluatePreFlightDecision({
@@ -674,20 +722,23 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
   // --------------------------------------------------------------------------
   // 18. Emergency Destination Safety & Dev Test Receiver Classification
   // --------------------------------------------------------------------------
-  it("18. Emergency Destination Safety: +919606654032 is classified as TEMPORARY_DEV_TEST_RECEIVER", async () => {
+  it("18. Emergency Destination Safety: +919740662046 is classified as TEMPORARY_DEV_TEST_RECEIVER and fails closed while disabled", async () => {
     const dayaConfig = hospitalRoutingService.getDefaultRoutingConfig("hosp_daya_thrissur");
-    expect(dayaConfig.emergencyDestination.primaryNumber).toBe("+919606654032");
+    expect(dayaConfig.emergencyDestination.primaryNumber).toBe("+919740662046");
     expect(dayaConfig.emergencyDestination.receiverClassification).toBe("TEMPORARY_DEV_TEST_RECEIVER");
     expect(dayaConfig.emergencyDestination.emergencyPstnTransferEnabled).toBe(false);
 
-    // Dynamic resolution returns safety classification headers
+    // Dynamic resolution returns HTTP 403 fail-closed with safety classification headers
     const req = new NextRequest(
       "https://gateway.smrkomed.com/api/webhooks/exotel/connect-destination?CallSid=call_safety_test&hospitalId=hosp_daya_thrissur&type=EMERGENCY&token=smrko_test_routing_token_2026"
     );
     const res = await handleConnectDestination(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.destination).toBeNull();
+    expect(json.error).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
     expect(res.headers.get("X-SMRKOMED-Receiver-Classification")).toBe("TEMPORARY_DEV_TEST_RECEIVER");
-    expect(res.headers.get("X-SMRKOMED-Emergency-PSTN-Transfer")).toBe("DISABLED_DEV_RECEIVER_ONLY");
+    expect(res.headers.get("X-SMRKOMED-Emergency-PSTN-Transfer")).toBe("DISABLED_FAIL_CLOSED");
   });
 
   // --------------------------------------------------------------------------
@@ -702,5 +753,216 @@ describe("Dynamic Hospital Telephony Routing & Multi-Tenant Engine", () => {
     // Production environment explicitly requested
     const prodApplet = dynamicExotelRoutingAdapter.getTargetVoicebotApplet(true);
     expect(prodApplet).toBe("1393239");
+  });
+
+  // --------------------------------------------------------------------------
+  // 20. Daya Receptionist Dynamic Dashboard Workflow & Independence
+  // --------------------------------------------------------------------------
+  it("20. Daya Receptionist Dynamic Dashboard Workflow: Setting authorized test destination immediately updates endpoint without Exotel applet change", async () => {
+    const DAYA_TENANT = "hosp_daya_thrissur";
+    const ROUTING_TOKEN = "smrko_test_routing_token_2026";
+    const AUTHORIZED_TEST_RECEPTION = "+914872475000"; // Authorized Daya front desk test number
+
+    // Step 1: Initial baseline check — resolves default development receiver
+    const initialResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_daya_initial_test",
+      hospitalId: DAYA_TENANT,
+      escalationType: "HUMAN_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(initialResolution.statusCode).toBe(200);
+    expect(initialResolution.jsonPayload?.destination?.numbers).toContain("+919606654032");
+
+    // Step 2: Dashboard Admin Workflow — Save draft with authorized receptionist destination & custom ring timeout
+    await hospitalRoutingService.saveDraft(
+      DAYA_TENANT,
+      {
+        receptionistDestination: {
+          primaryNumber: AUTHORIZED_TEST_RECEPTION,
+          departmentName: "Authorized Test Reception Desk",
+          extension: "201",
+        },
+        receptionistRingTimeoutSeconds: 25,
+      },
+      "usr_admin_daya",
+      "Daya Telephony Admin"
+    );
+
+    // Step 3: Publish version with immutable audit changelog
+    const publishResult = await hospitalRoutingService.publishVersion(
+      DAYA_TENANT,
+      "Phase 10.11: Explicitly authorized receptionist test destination configured",
+      "usr_admin_daya",
+      "Daya Telephony Admin"
+    );
+    expect(publishResult.success).toBe(true);
+
+    // Step 4: Endpoint dynamic resolution immediately reflects the new destination WITHOUT Exotel applet modification
+    const updatedResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_daya_updated_test",
+      hospitalId: DAYA_TENANT,
+      escalationType: "HUMAN_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(updatedResolution.statusCode).toBe(200);
+    expect(updatedResolution.jsonPayload?.destination?.numbers).toEqual([AUTHORIZED_TEST_RECEPTION]);
+    expect(updatedResolution.jsonPayload?.max_ringing_duration).toBe(25);
+    expect(updatedResolution.jsonPayload?.destination?.numbers).not.toContain("+919606654032");
+
+    // Step 5: Independence Check — Emergency destination remains completely independent and fails closed while transfer is disabled
+    const emergencyResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_daya_emergency_test",
+      hospitalId: DAYA_TENANT,
+      escalationType: "EMERGENCY_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(emergencyResolution.statusCode).toBe(403);
+    expect(emergencyResolution.jsonPayload?.destination).toBeNull();
+    expect(emergencyResolution.jsonPayload?.error).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+    expect(emergencyResolution.headers?.["X-SMRKOMED-Receiver-Classification"]).toBe("TEMPORARY_DEV_TEST_RECEIVER");
+    expect(emergencyResolution.headers?.["X-SMRKOMED-Emergency-PSTN-Transfer"]).toBe("DISABLED_FAIL_CLOSED");
+
+    // Step 6: Anti-Leakage Check — Unauthenticated or invalid requests FAIL CLOSED and never return test destinations
+    const unauthenticatedResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_unauth_probe",
+      hospitalId: DAYA_TENANT,
+      escalationType: "HUMAN_TRANSFER",
+      routingToken: "invalid_secret_token",
+    });
+    expect([401, 403]).toContain(unauthenticatedResolution.statusCode);
+    expect(unauthenticatedResolution.jsonPayload?.destination).toBeNull();
+    expect(unauthenticatedResolution.jsonPayload?.error).toContain("SECURITY_UNTRUSTED_TENANT");
+
+    // Step 7: Cleanup — Restore Daya baseline configuration
+    await hospitalRoutingService.saveDraft(
+      DAYA_TENANT,
+      {
+        receptionistDestination: {
+          primaryNumber: "+919606654032",
+          departmentName: "Front Desk Reception",
+          extension: "201",
+        },
+        emergencyDestination: {
+          primaryNumber: "+919740662046",
+          departmentName: "Casualty Emergency Desk (DEV TEST RECEIVER)",
+          extension: "100",
+          receiverClassification: "TEMPORARY_DEV_TEST_RECEIVER",
+          emergencyPstnTransferEnabled: false,
+        },
+        receptionistRingTimeoutSeconds: 20,
+      },
+      "usr_admin_daya",
+      "Daya Telephony Admin"
+    );
+    await hospitalRoutingService.publishVersion(
+      DAYA_TENANT,
+      "Restore baseline Daya routing configuration post-test",
+      "usr_admin_daya",
+      "Daya Telephony Admin"
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // 21. Phase 10.14: Final Staging Connect Safety Audit
+  // --------------------------------------------------------------------------
+  it("21. Phase 10.14 Safety Audit: Receptionist resolves +919606654032, and Emergency transfer fails closed while disabled", async () => {
+    const DAYA_TENANT = "hosp_daya_thrissur";
+    const ROUTING_TOKEN = "smrko_test_routing_token_2026";
+    const EXPECTED_RECEPTIONIST = "+919606654032";
+    const EXPECTED_EMERGENCY = "+919740662046";
+
+    // 1. HUMAN_TRANSFER contract verification (DTMF 2 - Appointment)
+    const humanResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_phase10_14_human",
+      hospitalId: DAYA_TENANT,
+      callTo: "08047291658",
+      escalationType: "HUMAN_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(humanResolution.statusCode).toBe(200);
+    expect(humanResolution.jsonPayload?.destination?.numbers).toEqual([EXPECTED_RECEPTIONIST]);
+    expect(humanResolution.jsonPayload?.max_ringing_duration).toBe(20);
+    expect(humanResolution.jsonPayload?.record).toBe(true);
+    expect(humanResolution.jsonPayload?.outgoing_phone_number).toBe("08047291658");
+    expect(humanResolution.jsonPayload?.fetch_after_attempt).toBe(false);
+    expect(humanResolution.headers?.["X-SMRKOMED-Escalation"]).toBe("HUMAN_TRANSFER");
+
+    // 2. Verified without hospitalId in query string (resolves cleanly via CallTo=08047291658)
+    const noHospitalIdResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_phase10_14_no_hospital_id",
+      callTo: "08047291658",
+      escalationType: "HUMAN_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(noHospitalIdResolution.statusCode).toBe(200);
+    expect(noHospitalIdResolution.jsonPayload?.destination?.numbers).toEqual([EXPECTED_RECEPTIONIST]);
+
+    // 3. EMERGENCY_TRANSFER contract verification: FAILS CLOSED when emergencyPstnTransferEnabled=false
+    // Critical safety requirement: Never return a dialable emergency destination over PSTN while disabled.
+    const emergencyResolution = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_phase10_14_emergency_disabled",
+      hospitalId: DAYA_TENANT,
+      callTo: "08047291658",
+      escalationType: "EMERGENCY_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(emergencyResolution.statusCode).toBe(403);
+    expect(emergencyResolution.jsonPayload?.destination).toBeNull();
+    expect(emergencyResolution.jsonPayload?.error).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+    expect(emergencyResolution.headers?.["X-SMRKOMED-Escalation"]).toBe("EMERGENCY");
+    expect(emergencyResolution.headers?.["X-SMRKOMED-Receiver-Classification"]).toBe("TEMPORARY_DEV_TEST_RECEIVER");
+    expect(emergencyResolution.headers?.["X-SMRKOMED-Emergency-PSTN-Transfer"]).toBe("DISABLED_FAIL_CLOSED");
+
+    // 4. Strict Safety: Callers are NOT silently redirected to AI Voicebot
+    expect(emergencyResolution.jsonPayload?.destination).toBeNull();
+
+    // 5. Authorized State: Only when explicitly authorized by clinical admin (emergencyPstnTransferEnabled: true)
+    await hospitalRoutingService.saveDraft(
+      DAYA_TENANT,
+      {
+        emergencyDestination: {
+          primaryNumber: EXPECTED_EMERGENCY,
+          departmentName: "Casualty Emergency Desk",
+          emergencyPstnTransferEnabled: true,
+        },
+      },
+      "usr_admin_daya",
+      "Daya Admin"
+    );
+    await hospitalRoutingService.publishVersion(DAYA_TENANT, "Authorized emergency clinical trunk for testing");
+
+    const authorizedEmergency = await dynamicExotelRoutingAdapter.resolveConnectDestination({
+      callSid: "call_phase10_14_emergency_authorized",
+      hospitalId: DAYA_TENANT,
+      callTo: "08047291658",
+      escalationType: "EMERGENCY_TRANSFER",
+      routingToken: ROUTING_TOKEN,
+    });
+    expect(authorizedEmergency.statusCode).toBe(200);
+    expect(authorizedEmergency.jsonPayload?.destination?.numbers).toEqual([EXPECTED_EMERGENCY]);
+    expect(authorizedEmergency.jsonPayload?.max_ringing_duration).toBe(25);
+
+    // 6. Restore disabled safety baseline
+    await hospitalRoutingService.saveDraft(
+      DAYA_TENANT,
+      {
+        emergencyDestination: {
+          primaryNumber: EXPECTED_EMERGENCY,
+          departmentName: "Casualty Emergency Desk (DEV TEST RECEIVER)",
+          extension: "100",
+          receiverClassification: "TEMPORARY_DEV_TEST_RECEIVER",
+          emergencyPstnTransferEnabled: false,
+        },
+        receptionistDestination: {
+          primaryNumber: EXPECTED_RECEPTIONIST,
+          departmentName: "Main Inbound Reception (DEV TEST RECEIVER)",
+          extension: "201",
+        },
+        receptionistRingTimeoutSeconds: 20,
+      },
+      "usr_admin_daya",
+      "Daya Admin"
+    );
+    await hospitalRoutingService.publishVersion(DAYA_TENANT, "Restored disabled safety baseline");
   });
 });

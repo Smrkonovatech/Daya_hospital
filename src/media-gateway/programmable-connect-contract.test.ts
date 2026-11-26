@@ -26,17 +26,30 @@ import { hospitalRoutingService } from "@/lib/services/hospital-routing-service"
 
 describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", () => {
   const DAYA_TENANT = "hosp_daya_thrissur";
+  const DAYA_EMERGENCY_TARGET = "+919740662046";
+  const DAYA_RECEPTIONIST_TARGET = "+919606654032";
   const DAYA_FORWARDING_TARGET = "+919606654032";
 
-  beforeEach(() => {
+  beforeEach(async () => {
     (mediaSessionManager as any).escalationRecords.clear();
     (mediaSessionManager as any).escalationsByCaller.clear();
+    const draft = await hospitalRoutingService.getDraft(DAYA_TENANT);
+    if (draft.emergencyDestination?.emergencyPstnTransferEnabled) {
+      await hospitalRoutingService.saveDraft(DAYA_TENANT, {
+        ...draft,
+        emergencyDestination: {
+          ...draft.emergencyDestination,
+          emergencyPstnTransferEnabled: false,
+        },
+      });
+      await hospitalRoutingService.publishVersion(DAYA_TENANT, "Ensure emergency PSTN disabled baseline in test setup");
+    }
   });
 
   // --------------------------------------------------------------------------
   // 1. Daya Emergency Destination Contract Test
   // --------------------------------------------------------------------------
-  it("1. Daya Emergency: Returns Exotel Programmable Connect JSON schema with +919606654032", async () => {
+  it("1. Daya Emergency Safety: Fails closed when transfer is disabled; returns Exotel Programmable Connect JSON schema with +919740662046 when authorized", async () => {
     const callSid = "call_contract_daya_emergency";
     const record: EscalationDecisionRecord = {
       callSid,
@@ -44,31 +57,68 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
       hospitalId: DAYA_TENANT,
       callerNumber: "+919846001122",
       escalationState: "EMERGENCY",
-      destination: DAYA_FORWARDING_TARGET,
+      destination: DAYA_EMERGENCY_TARGET,
       reason: "Acute cardiac triage",
       timestamp: Date.now(),
-      routingVersion: 1,
     };
     await mediaSessionManager.recordEscalation(record);
 
-    const req = new NextRequest(`https://gateway.smrkomed.com/exotel/connect-destination?CallSid=${callSid}`);
-    const res = await GET(req);
+    // Part A: Disabled state (Current Safety Baseline: emergencyPstnTransferEnabled=false)
+    const reqDisabled = new NextRequest(`https://gateway.smrkomed.com/exotel/connect-destination?CallSid=${callSid}`);
+    const resDisabled = await GET(reqDisabled);
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("application/json");
-    expect(res.headers.get("X-SMRKOMED-Tenant")).toBe(DAYA_TENANT);
-    expect(res.headers.get("X-SMRKOMED-Escalation")).toBe("EMERGENCY");
+    expect(resDisabled.status).toBe(403);
+    expect(resDisabled.headers.get("content-type")).toContain("application/json");
+    expect(resDisabled.headers.get("X-SMRKOMED-Tenant")).toBe(DAYA_TENANT);
+    expect(resDisabled.headers.get("X-SMRKOMED-Escalation")).toBe("EMERGENCY");
+    expect(resDisabled.headers.get("X-SMRKOMED-Receiver-Classification")).toBe("TEMPORARY_DEV_TEST_RECEIVER");
+    expect(resDisabled.headers.get("X-SMRKOMED-Emergency-PSTN-Transfer")).toBe("DISABLED_FAIL_CLOSED");
 
-    const json = await res.json();
-    expect(json).toEqual({
-      fetch_after_attempt: false,
-      destination: {
-        numbers: [DAYA_FORWARDING_TARGET],
+    const jsonDisabled = await resDisabled.json();
+    expect(jsonDisabled.error).toBe("EMERGENCY_PSTN_TRANSFER_DISABLED_FAIL_CLOSED");
+    expect(jsonDisabled.destination).toBeNull();
+
+    // Part B: Authorized state (When admin explicitly authorizes PSTN transfer)
+    const draft = await hospitalRoutingService.getDraft(DAYA_TENANT);
+    await hospitalRoutingService.saveDraft(DAYA_TENANT, {
+      ...draft,
+      emergencyDestination: {
+        ...draft.emergencyDestination,
+        emergencyPstnTransferEnabled: true,
       },
-      record: true,
-      outgoing_phone_number: "08047291658",
-      max_ringing_duration: 25,
     });
+    await hospitalRoutingService.publishVersion(DAYA_TENANT, "Temporarily authorize emergency PSTN for contract schema verification");
+
+    try {
+      const reqAuth = new NextRequest(`https://gateway.smrkomed.com/exotel/connect-destination?CallSid=${callSid}`);
+      const resAuth = await GET(reqAuth);
+
+      expect(resAuth.status).toBe(200);
+      expect(resAuth.headers.get("content-type")).toContain("application/json");
+      expect(resAuth.headers.get("X-SMRKOMED-Tenant")).toBe(DAYA_TENANT);
+      expect(resAuth.headers.get("X-SMRKOMED-Escalation")).toBe("EMERGENCY");
+
+      const jsonAuth = await resAuth.json();
+      expect(jsonAuth).toEqual({
+        fetch_after_attempt: false,
+        destination: {
+          numbers: [DAYA_EMERGENCY_TARGET],
+        },
+        record: true,
+        outgoing_phone_number: "08047291658",
+        max_ringing_duration: 25,
+      });
+    } finally {
+      // Restore safe disabled state
+      await hospitalRoutingService.saveDraft(DAYA_TENANT, {
+        ...draft,
+        emergencyDestination: {
+          ...draft.emergencyDestination,
+          emergencyPstnTransferEnabled: false,
+        },
+      });
+      await hospitalRoutingService.publishVersion(DAYA_TENANT, "Restore disabled emergency PSTN transfer safety baseline");
+    }
   });
 
   // --------------------------------------------------------------------------
@@ -148,10 +198,10 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
     // 3. Admin UI dry-run simulation remains operational
     const asterSim = await hospitalRoutingService.simulateRouting({
       hospitalId: "hosp_aster_medcity",
-      escalationType: "EMERGENCY",
+      escalationType: "HUMAN_TRANSFER",
     });
     expect(asterSim.success).toBe(true);
-    expect(asterSim.destinationNumber).toBe("+914846699999");
+    expect(asterSim.destinationNumber).toBe("+914846699000");
   });
 
   // --------------------------------------------------------------------------
@@ -211,9 +261,9 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
       streamSid: "stream_db_outage",
       hospitalId: DAYA_TENANT,
       callerNumber: "+919846009999",
-      escalationState: "EMERGENCY",
-      destination: DAYA_FORWARDING_TARGET,
-      reason: "In-memory emergency resolution during DB downtime",
+      escalationState: "HUMAN_TRANSFER",
+      destination: DAYA_RECEPTIONIST_TARGET,
+      reason: "In-memory receptionist resolution during DB downtime",
       timestamp: Date.now(),
       routingVersion: 1,
     };
@@ -225,7 +275,7 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.destination.numbers).toEqual([DAYA_FORWARDING_TARGET]);
+    expect(json.destination.numbers).toEqual([DAYA_RECEPTIONIST_TARGET]);
   });
 
   // --------------------------------------------------------------------------
@@ -251,21 +301,21 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
     // Daya Hospital
     const dayaRes = await hospitalRoutingService.resolveLiveDestination({
       hospitalId: DAYA_TENANT,
-      escalationType: "EMERGENCY",
-      isLiveCall: true,
+      escalationType: "HUMAN_TRANSFER",
+      isLiveCall: false,
     });
-    expect(dayaRes.destinationNumber).toBe(DAYA_FORWARDING_TARGET);
+    expect(dayaRes.destinationNumber).toBe(DAYA_RECEPTIONIST_TARGET);
 
     // Other tenants can never resolve to Daya's forwarding number
     const asterSim = await hospitalRoutingService.simulateRouting({
       hospitalId: "hosp_aster_medcity",
-      escalationType: "EMERGENCY",
+      escalationType: "HUMAN_TRANSFER",
     });
     expect(asterSim.destinationNumber).not.toBe(DAYA_FORWARDING_TARGET);
 
     const kimsSim = await hospitalRoutingService.simulateRouting({
       hospitalId: "hosp_kims_trivandrum",
-      escalationType: "EMERGENCY",
+      escalationType: "HUMAN_TRANSFER",
     });
     expect(kimsSim.destinationNumber).not.toBe(DAYA_FORWARDING_TARGET);
   });
@@ -312,9 +362,9 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
       streamSid: "stream_v_snap",
       hospitalId: DAYA_TENANT,
       callerNumber: "+919846001122",
-      escalationState: "EMERGENCY",
-      destination: DAYA_FORWARDING_TARGET,
-      reason: "Emergency locked to v1",
+      escalationState: "HUMAN_TRANSFER",
+      destination: DAYA_RECEPTIONIST_TARGET,
+      reason: "Receptionist transfer locked to v1",
       timestamp: Date.now(),
       routingVersion: 1, // Locked to v1!
     };
@@ -323,14 +373,14 @@ describe("PHASE 9.6.1: Exotel Programmable Connect Contract & Dynamic Routing", 
     const res = await hospitalRoutingService.resolveLiveDestination({
       hospitalId: DAYA_TENANT,
       callSid,
-      escalationType: "EMERGENCY",
+      escalationType: "HUMAN_TRANSFER",
       versionNumber: record.routingVersion,
-      isLiveCall: true,
+      isLiveCall: false,
     });
 
     expect(res.success).toBe(true);
     expect(res.versionUsed).toBe(1);
-    expect(res.destinationNumber).toBe(DAYA_FORWARDING_TARGET);
+    expect(res.destinationNumber).toBe(DAYA_RECEPTIONIST_TARGET);
   });
 
   // --------------------------------------------------------------------------

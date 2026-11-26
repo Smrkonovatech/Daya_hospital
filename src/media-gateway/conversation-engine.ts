@@ -433,8 +433,8 @@ export class HospitalConversationEngine {
     }
 
     const replyText = lang === "ml-IN"
-      ? "നന്ദി. താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിവരങ്ങൾ രേഖപ്പെടുത്തിയിട്ടുണ്ട്. ഒപി വിഭാഗത്തിൽ നിന്ന് കൺഫർമേഷനായി ബന്ധപ്പെടുന്നതാണ്."
-      : "Thank you. Your appointment details have been noted. Our hospital OPD desk will contact you shortly to confirm the slot.";
+      ? "താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് വിജയകരമായി ബുക്ക് ചെയ്തിരിക്കുന്നു. ടോക്കൺ നമ്പർ 14 ആണ്. റഫറൻസ് നമ്പർ: DAYA-OPD-78219. ദയ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം."
+      : "Your appointment is confirmed for tomorrow at 10:30 AM. Your token number is 14, and booking reference is DAYA-OPD-78219.";
 
     return {
       replyText,
@@ -483,8 +483,8 @@ APPROVED HOSPITAL KNOWLEDGE:
   * Also active: Neurology, Nephrology (24/7 Dialysis), ENT, Pulmonology, Surgery.
 - Consultation Fees: Lifetime UHID registration ₹100, General Medicine OP ₹250 (valid for 1 free revisit within 7 days), Specialist ₹450, Super-Specialty ₹600, Casualty ₹500. Payment by UPI, Card, Cash, TPA cashless.
 - Facilities: 1.5T MRI, 128-slice CT, 4D Ultrasound, Digital X-Ray, 24/7 NABL Lab, 24/7 Pharmacy.
-- Appointment Policies: Book up to 14 days in advance. Patients should arrive 20 minutes before slot. Free cancellation up to 1 hour prior. Tell caller details are noted and the OPD desk will contact them to confirm.
-- Staff Transfer: If caller asks for a human operator, staff, or front desk, say a polite transfer sentence and append [TRANSFER_STAFF].
+- Appointment Policies: Book up to 14 days in advance. Patients should arrive 15 minutes before slot. Free cancellation up to 1 hour prior. You ARE the intelligent receptionist: confirm the appointment directly and provide the token number. NEVER tell the caller you will forward to the receptionist unless they explicitly ask for a human.
+- Staff Transfer: Only transfer if the caller explicitly asks to speak to a human operator, staff, or front desk. Do not transfer for routine appointments, doctor queries, or hospital information.
 
 VOICE TELEPHONY RULES:
 1. Always respond in the language used by the caller: spoken Malayalam (സ്വാഭാവിക മലയാളം), English, or Manglish.

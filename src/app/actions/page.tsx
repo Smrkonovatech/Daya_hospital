@@ -283,7 +283,7 @@ function ActionsContent() {
                 )}
               </div>
               <span className="text-[11px] text-slate-500">
-                Attempted by voice agent
+                Attempted by SMRKO VOICE
               </span>
             </CardContent>
           </Card>

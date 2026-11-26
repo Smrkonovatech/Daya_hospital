@@ -85,7 +85,7 @@ export function SarvamVoiceAgentSettings() {
       <Card>
         <CardContent className="py-12 text-center text-slate-500">
           <Clock className="h-8 w-8 animate-spin mx-auto mb-2 text-[#0C5DB8]" />
-          Loading Sarvam Voice Agents integration settings...
+          Loading SMRKO VOICE integration settings...
         </CardContent>
       </Card>
     );
@@ -102,14 +102,14 @@ export function SarvamVoiceAgentSettings() {
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-[#0C5DB8]" />
               <h3 className="font-semibold text-slate-900 text-lg">
-                Sarvam Voice Agents / Samvaad Integration (Phase 10)
+                SMRKO VOICE Agent Deployment & Integration
               </h3>
               <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
                 Phase 10 Architecture
               </Badge>
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              Architectural migration path to Sarvam Voice Agents with instant zero-risk rollback to Core Custom STT/TTS pipeline.
+              Architectural migration path to SMRKO VOICE agentic runtime with instant zero-risk rollback to direct streaming pipeline.
             </p>
           </div>
 
@@ -117,7 +117,7 @@ export function SarvamVoiceAgentSettings() {
             <div className="text-right">
               <label className="text-xs font-medium text-slate-500 block mb-1">Active Conversational Engine</label>
               <Badge className={isCoreMode ? "bg-emerald-600 text-white" : "bg-purple-600 text-white"}>
-                {isCoreMode ? "Sarvam Core (Custom Pipeline)" : "Sarvam Voice Agents (Samvaad)"}
+                {isCoreMode ? "SMRKO VOICE (Direct Streaming)" : "SMRKO VOICE (Agentic Runtime)"}
               </Badge>
             </div>
           </div>
@@ -126,13 +126,13 @@ export function SarvamVoiceAgentSettings() {
 
       {/* Mode Selection Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Option A: Sarvam Core Custom Pipeline (Current Default Safe) */}
+        {/* Option A: SMRKO VOICE Direct Streaming Pipeline */}
         <Card className={`border-2 transition-all ${isCoreMode ? "border-emerald-500 bg-emerald-50/10 shadow-sm" : "border-slate-200 opacity-80"}`}>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2 text-slate-900">
                 <Cpu className="h-5 w-5 text-emerald-600" />
-                Sarvam Core Custom Pipeline
+                SMRKO VOICE Direct Streaming Pipeline
               </CardTitle>
               {isCoreMode && (
                 <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300">
@@ -141,14 +141,14 @@ export function SarvamVoiceAgentSettings() {
               )}
             </div>
             <CardDescription className="text-xs text-slate-600">
-              Low-level WebSocket pipeline: Sarvam Saaras:v4 STT + 105b LLM + Bulbul:v3 TTS (Kavitha/Ratan).
+              Low-level WebSocket pipeline: Speech Recognition + Conversation Engine + Voice Synthesis (Kavitha/Ratan).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-2">
             <div className="text-xs text-slate-600 space-y-1.5 bg-slate-50 p-3 rounded border border-slate-200">
               <div className="flex justify-between">
                 <span className="font-medium text-slate-500">Telephony Gateway:</span>
-                <span className="font-semibold text-slate-700">Railway WebSocket (/exotel/voicebot)</span>
+                <span className="font-semibold text-slate-700">Media Gateway WebSocket (/exotel/voicebot)</span>
               </div>
               <div className="flex justify-between">
                 <span className="font-medium text-slate-500">Passthru Routing:</span>
@@ -168,18 +168,18 @@ export function SarvamVoiceAgentSettings() {
               className="w-full"
             >
               <RotateCcw className="h-4 w-4 mr-2" />
-              {isCoreMode ? "Currently Active Engine" : "Rollback to Sarvam Core"}
+              {isCoreMode ? "Currently Active Engine" : "Rollback to Direct Streaming"}
             </Button>
           </CardContent>
         </Card>
 
-        {/* Option B: Sarvam Voice Agents / Samvaad */}
+        {/* Option B: SMRKO VOICE Agentic Runtime */}
         <Card className={`border-2 transition-all ${!isCoreMode ? "border-purple-500 bg-purple-50/10 shadow-sm" : "border-slate-200 opacity-80"}`}>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2 text-slate-900">
                 <Sparkles className="h-5 w-5 text-purple-600" />
-                Sarvam Voice Agents (Samvaad)
+                SMRKO VOICE Agentic Runtime
               </CardTitle>
               {!isCoreMode && (
                 <Badge variant="outline" className="bg-purple-100 text-purple-800 border-purple-300">
@@ -215,7 +215,7 @@ export function SarvamVoiceAgentSettings() {
               className="w-full bg-purple-600 hover:bg-purple-700 text-white"
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              {!isCoreMode ? "Currently Active Engine" : "Activate Sarvam Voice Agents (Dev Mode)"}
+              {!isCoreMode ? "Currently Active Engine" : "Activate SMRKO VOICE Agentic Runtime (Dev Mode)"}
             </Button>
           </CardContent>
         </Card>
@@ -265,20 +265,20 @@ export function SarvamVoiceAgentSettings() {
           <CardHeader className="bg-amber-50/50 pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-amber-900">
               <PhoneForwarded className="h-5 w-5 text-amber-600" />
-              Exotel BYOT & Transfer Compatibility
+              IVR Provider & Transfer Compatibility
             </CardTitle>
             <CardDescription className="text-xs text-amber-800/80">
-              Telephony status on Exotel Singapore account (smrkonova1 / 08047291658).
+              Telephony status on carrier account (smrkonova1 / 08047291658).
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4 space-y-3 text-sm">
             <div className="p-3 bg-amber-50 rounded border border-amber-200 text-xs text-amber-900 space-y-1.5">
               <div className="flex items-center gap-1.5 font-semibold text-amber-800">
                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                <span>Sarvam Exotel Transfer Limitation:</span>
+                <span>Carrier Call Transfer Notice:</span>
               </div>
               <p>
-                Unlike Vobiz or Plivo, Sarvam's official guide states that <strong>Exotel requires extra applets in your Exotel App or enablement through Sarvam Support</strong> to execute a live call transfer.
+                Live call transfer requires verified carrier applets or Programmable Connect endpoints to execute a live receptionist transfer.
               </p>
               <p className="font-medium text-amber-950">
                 Live carrier calls are currently safe on Smrkomed's Core pipeline with Passthru routing (+919606654032).
@@ -286,23 +286,23 @@ export function SarvamVoiceAgentSettings() {
             </div>
 
             <div className="text-xs text-slate-500 space-y-1">
-              <div><strong>ExoPhone:</strong> 08047291658 (Singapore api.exotel.com)</div>
+              <div><strong>Hospital Inbound Line:</strong> 08047291658</div>
               <div><strong>Voicebot Applet:</strong> 1393239</div>
-              <div><strong>Auth Header:</strong> X-API-Key (Voice Agents platform standard)</div>
+              <div><strong>Auth Header:</strong> X-API-Key (SMRKO VOICE platform standard)</div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Smrkomed Tool APIs Connected */}
+      {/* Smrkomed SMRKO VOICE Action Endpoints */}
       <Card className="shadow-sm">
         <CardHeader className="bg-slate-50 pb-3">
           <CardTitle className="text-base flex items-center gap-2 text-slate-800">
             <Layers className="h-5 w-5 text-teal-600" />
-            Smrkomed Control Plane Tool Endpoints
+            Smrkomed SMRKO VOICE Action Endpoints
           </CardTitle>
           <CardDescription className="text-xs">
-            Authenticated REST endpoints provided by Smrkomed for Sarvam Voice Agents to interact with hospital data.
+            Authenticated REST endpoints provided by Smrkomed for SMRKO VOICE agents to interact with hospital data.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">

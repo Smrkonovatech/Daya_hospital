@@ -49,16 +49,31 @@ export class GrandisHmsAdapter implements IHmsConnector {
     return Boolean(this.baseUrl && this.apiKey);
   }
 
+  private isSimulationMode(): boolean {
+    return process.env.HMS_ENVIRONMENT === "simulation" || process.env.DAYA_HMS_SIMULATION === "true";
+  }
+
   public async healthCheck(): Promise<HmsConnectionHealth> {
     if (!this.isConfigured()) {
+      if (this.isSimulationMode()) {
+        return {
+          status: "HEALTHY",
+          product: "Grandis HMS",
+          vpn_verified: false,
+          latency_ms: 120,
+          mode: "MOCK_SANDBOX",
+          last_checked: new Date().toISOString(),
+          details: "Grandis HMS Simulation Sandbox active. Production VPN endpoints awaiting live handshake.",
+        };
+      }
       return {
-        status: "HEALTHY",
+        status: "DOWN",
         product: "Grandis HMS",
         vpn_verified: false,
-        latency_ms: 120,
-        mode: "MOCK_SANDBOX",
+        latency_ms: 0,
+        mode: "PRODUCTION",
         last_checked: new Date().toISOString(),
-        details: "Grandis HMS Sandbox active. Production VPN endpoints awaiting live handshake.",
+        details: "Grandis HMS not configured. Base URL or API Key missing. Status: DISCONNECTED",
       };
     }
 
@@ -117,13 +132,16 @@ export class GrandisHmsAdapter implements IHmsConnector {
 
   public async getDepartments(): Promise<StandardDepartment[]> {
     if (!this.isConfigured()) {
-      const departments = await this.fallbackSandbox.getDepartments();
-      return departments.map((d) => ({
-        department_id: d.id,
-        department_name: d.name,
-        hod_name: d.hodName,
-        room_numbers: d.roomNumbers,
-      }));
+      if (this.isSimulationMode()) {
+        const departments = await this.fallbackSandbox.getDepartments();
+        return departments.map((d) => ({
+          department_id: d.id,
+          department_name: d.name,
+          hod_name: d.hodName,
+          room_numbers: d.roomNumbers,
+        }));
+      }
+      throw new Error("GRANDIS_DISCONNECTED: Grandis HMS is not configured and simulation mode is off.");
     }
 
     try {
@@ -138,29 +156,35 @@ export class GrandisHmsAdapter implements IHmsConnector {
         hod_name: String(item.hod_name || item.hodName || ""),
         room_numbers: String(item.rooms || item.roomNumbers || ""),
       }));
-    } catch {
-      const depts = await this.fallbackSandbox.getDepartments();
-      return depts.map((d) => ({
-        department_id: d.id,
-        department_name: d.name,
-        hod_name: d.hodName,
-        room_numbers: d.roomNumbers,
-      }));
+    } catch (err) {
+      if (this.isSimulationMode()) {
+        const depts = await this.fallbackSandbox.getDepartments();
+        return depts.map((d) => ({
+          department_id: d.id,
+          department_name: d.name,
+          hod_name: d.hodName,
+          room_numbers: d.roomNumbers,
+        }));
+      }
+      throw new Error(`GRANDIS_UNAVAILABLE: Cannot reach Grandis HMS. ${err instanceof Error ? err.message : ""}`);
     }
   }
 
   public async getDoctors(departmentId?: string): Promise<StandardDoctor[]> {
     if (!this.isConfigured()) {
-      const doctors = await this.fallbackSandbox.getDoctors(departmentId);
-      return doctors.map((doc) => ({
-        doctor_id: doc.doctorId,
-        doctor_name: doc.doctorName,
-        department_id: doc.department,
-        department_name: doc.department,
-        qualifications: doc.qualifications,
-        opd_days: doc.opdDays,
-        consultation_fee: doc.consultationFee,
-      }));
+      if (this.isSimulationMode()) {
+        const doctors = await this.fallbackSandbox.getDoctors(departmentId);
+        return doctors.map((doc) => ({
+          doctor_id: doc.doctorId,
+          doctor_name: doc.doctorName,
+          department_id: doc.department,
+          department_name: doc.department,
+          qualifications: doc.qualifications,
+          opd_days: doc.opdDays,
+          consultation_fee: doc.consultationFee,
+        }));
+      }
+      throw new Error("GRANDIS_DISCONNECTED: Grandis HMS is not configured.");
     }
 
     try {
@@ -181,17 +205,20 @@ export class GrandisHmsAdapter implements IHmsConnector {
         opd_days: Array.isArray(doc.opd_days) ? (doc.opd_days as string[]) : ["Mon", "Wed", "Fri"],
         consultation_fee: Number(doc.fee || doc.consultationFee || 400),
       }));
-    } catch {
-      const doctors = await this.fallbackSandbox.getDoctors(departmentId);
-      return doctors.map((doc) => ({
-        doctor_id: doc.doctorId,
-        doctor_name: doc.doctorName,
-        department_id: doc.department,
-        department_name: doc.department,
-        qualifications: doc.qualifications,
-        opd_days: doc.opdDays,
-        consultation_fee: doc.consultationFee,
-      }));
+    } catch (err) {
+      if (this.isSimulationMode()) {
+        const doctors = await this.fallbackSandbox.getDoctors(departmentId);
+        return doctors.map((doc) => ({
+          doctor_id: doc.doctorId,
+          doctor_name: doc.doctorName,
+          department_id: doc.department,
+          department_name: doc.department,
+          qualifications: doc.qualifications,
+          opd_days: doc.opdDays,
+          consultation_fee: doc.consultationFee,
+        }));
+      }
+      throw new Error(`GRANDIS_UNAVAILABLE: Cannot reach Grandis HMS. ${err instanceof Error ? err.message : ""}`);
     }
   }
 
@@ -201,16 +228,19 @@ export class GrandisHmsAdapter implements IHmsConnector {
 
   public async getAvailableSlots(doctorId: string, date: string): Promise<StandardSlot[]> {
     if (!this.isConfigured()) {
-      const slots = await this.fallbackSandbox.checkDoctorSlots(doctorId, date);
-      return slots.map((s) => ({
-        slot_id: s.slotId,
-        doctor_id: s.doctorId,
-        doctor_name: s.doctorName,
-        date: s.date,
-        time: s.time,
-        is_available: s.isAvailable,
-        consultation_fee: s.consultationFee,
-      }));
+      if (this.isSimulationMode()) {
+        const slots = await this.fallbackSandbox.checkDoctorSlots(doctorId, date);
+        return slots.map((s) => ({
+          slot_id: s.slotId,
+          doctor_id: s.doctorId,
+          doctor_name: s.doctorName,
+          date: s.date,
+          time: s.time,
+          is_available: s.isAvailable,
+          consultation_fee: s.consultationFee,
+        }));
+      }
+      throw new Error("GRANDIS_DISCONNECTED: Grandis HMS is not configured.");
     }
 
     try {
@@ -233,17 +263,20 @@ export class GrandisHmsAdapter implements IHmsConnector {
         is_available: Boolean(s.available ?? s.isAvailable),
         consultation_fee: Number(s.fee || s.consultationFee || 400),
       }));
-    } catch {
-      const slots = await this.fallbackSandbox.checkDoctorSlots(doctorId, date);
-      return slots.map((s) => ({
-        slot_id: s.slotId,
-        doctor_id: s.doctorId,
-        doctor_name: s.doctorName,
-        date: s.date,
-        time: s.time,
-        is_available: s.isAvailable,
-        consultation_fee: s.consultationFee,
-      }));
+    } catch (err) {
+      if (this.isSimulationMode()) {
+        const slots = await this.fallbackSandbox.checkDoctorSlots(doctorId, date);
+        return slots.map((s) => ({
+          slot_id: s.slotId,
+          doctor_id: s.doctorId,
+          doctor_name: s.doctorName,
+          date: s.date,
+          time: s.time,
+          is_available: s.isAvailable,
+          consultation_fee: s.consultationFee,
+        }));
+      }
+      throw new Error(`GRANDIS_UNAVAILABLE: Cannot reach Grandis HMS. ${err instanceof Error ? err.message : ""}`);
     }
   }
 
@@ -252,17 +285,20 @@ export class GrandisHmsAdapter implements IHmsConnector {
     uhid?: string;
   }): Promise<StandardPatient | null> {
     if (!this.isConfigured()) {
-      if (!identifier.mobile) return null;
-      const patient = await this.fallbackSandbox.lookupPatientByMobile(identifier.mobile);
-      if (!patient) return null;
-      return {
-        patient_id: patient.uhid,
-        patient_name: patient.name,
-        mobile_number: patient.mobile,
-        uhid: patient.uhid,
-        age: patient.age,
-        gender: patient.gender,
-      };
+      if (this.isSimulationMode()) {
+        if (!identifier.mobile) return null;
+        const patient = await this.fallbackSandbox.lookupPatientByMobile(identifier.mobile);
+        if (!patient) return null;
+        return {
+          patient_id: patient.uhid,
+          patient_name: patient.name,
+          mobile_number: patient.mobile,
+          uhid: patient.uhid,
+          age: patient.age,
+          gender: patient.gender,
+        };
+      }
+      return null;
     }
 
     try {
@@ -286,17 +322,20 @@ export class GrandisHmsAdapter implements IHmsConnector {
         gender: data.gender ? String(data.gender) : undefined,
       };
     } catch {
-      if (!identifier.mobile) return null;
-      const patient = await this.fallbackSandbox.lookupPatientByMobile(identifier.mobile);
-      if (!patient) return null;
-      return {
-        patient_id: patient.uhid,
-        patient_name: patient.name,
-        mobile_number: patient.mobile,
-        uhid: patient.uhid,
-        age: patient.age,
-        gender: patient.gender,
-      };
+      if (this.isSimulationMode()) {
+        if (!identifier.mobile) return null;
+        const patient = await this.fallbackSandbox.lookupPatientByMobile(identifier.mobile);
+        if (!patient) return null;
+        return {
+          patient_id: patient.uhid,
+          patient_name: patient.name,
+          mobile_number: patient.mobile,
+          uhid: patient.uhid,
+          age: patient.age,
+          gender: patient.gender,
+        };
+      }
+      return null;
     }
   }
 
@@ -319,28 +358,42 @@ export class GrandisHmsAdapter implements IHmsConnector {
 
   public async bookAppointment(request: StandardBookingRequest): Promise<StandardBookingResponse> {
     if (!this.isConfigured()) {
-      const res = await this.fallbackSandbox.bookAppointment({
-        doctorId: request.doctor_id,
-        doctorName: request.doctor_name,
-        department: request.department_name || "General OPD",
-        date: request.date,
-        slotTime: request.slot_time,
-        patientMobile: request.patient_mobile,
-        patientName: request.patient_name,
-        idempotencyKey: request.idempotency_key,
-        uhid: request.uhid,
-      });
+      if (this.isSimulationMode()) {
+        const res = await this.fallbackSandbox.bookAppointment({
+          doctorId: request.doctor_id,
+          doctorName: request.doctor_name,
+          department: request.department_name || "General OPD",
+          date: request.date,
+          slotTime: request.slot_time,
+          patientMobile: request.patient_mobile,
+          patientName: request.patient_name,
+          idempotencyKey: request.idempotency_key,
+          uhid: request.uhid,
+        });
+
+        return {
+          success: res.success,
+          booking_ref: res.bookingRef,
+          token_number: res.tokenNumber,
+          consultation_fee: res.consultationFee,
+          allocated_slot: res.allocatedSlot,
+          verified_by_hms: res.success,
+          error_code: res.errorCode as StandardBookingResponse["error_code"],
+          error_message: res.error,
+          retry_after_ms: res.retryAfterMs,
+          is_simulated: true,
+          source: "SIMULATED_MOCK_SANDBOX",
+          simulation_notice: "Simulated Grandis sandbox booking. Not confirmed with hospital core.",
+        };
+      }
 
       return {
-        success: res.success,
-        booking_ref: res.bookingRef,
-        token_number: res.tokenNumber,
-        consultation_fee: res.consultationFee,
-        allocated_slot: res.allocatedSlot,
-        verified_by_hms: res.success,
-        error_code: res.errorCode as StandardBookingResponse["error_code"],
-        error_message: res.error,
-        retry_after_ms: res.retryAfterMs,
+        success: false,
+        verified_by_hms: false,
+        error_code: "VPN_UNAVAILABLE",
+        error_message: "Grandis HMS gateway is not configured. Hospital VPN connection required.",
+        is_simulated: false,
+        source: "PRODUCTION_HMS",
       };
     }
 
@@ -374,6 +427,8 @@ export class GrandisHmsAdapter implements IHmsConnector {
           verified_by_hms: false,
           error_code: res.status === 409 ? "SLOT_UNAVAILABLE" : "VALIDATION_FAILED",
           error_message: json.message || `Grandis returned error HTTP ${res.status}`,
+          is_simulated: false,
+          source: "PRODUCTION_HMS",
         };
       }
 
@@ -386,13 +441,45 @@ export class GrandisHmsAdapter implements IHmsConnector {
         consultation_fee: Number(json.fee || json.consultationFee || 400),
         allocated_slot: `${request.date} ${request.slot_time}`,
         verified_by_hms: true,
+        is_simulated: false,
+        source: "PRODUCTION_HMS",
       };
     } catch (err) {
+      if (this.isSimulationMode()) {
+        const res = await this.fallbackSandbox.bookAppointment({
+          doctorId: request.doctor_id,
+          doctorName: request.doctor_name,
+          department: request.department_name || "General OPD",
+          date: request.date,
+          slotTime: request.slot_time,
+          patientMobile: request.patient_mobile,
+          patientName: request.patient_name,
+          idempotencyKey: request.idempotency_key,
+          uhid: request.uhid,
+        });
+
+        return {
+          success: res.success,
+          booking_ref: res.bookingRef,
+          token_number: res.tokenNumber,
+          consultation_fee: res.consultationFee,
+          allocated_slot: res.allocatedSlot,
+          verified_by_hms: res.success,
+          error_code: res.errorCode as StandardBookingResponse["error_code"],
+          error_message: res.error,
+          is_simulated: true,
+          source: "SIMULATED_MOCK_SANDBOX",
+          simulation_notice: "Simulated fallback: network to Grandis timed out.",
+        };
+      }
+
       return {
         success: false,
         verified_by_hms: false,
         error_code: "HMS_TIMEOUT",
-        error_message: err instanceof Error ? err.message : "Timeout contacting Grandis HMS",
+        error_message: err instanceof Error ? `Grandis timeout: ${err.message}` : "Timeout contacting Grandis HMS private IP. VPN offline.",
+        is_simulated: false,
+        source: "PRODUCTION_HMS",
       };
     }
   }
@@ -400,50 +487,81 @@ export class GrandisHmsAdapter implements IHmsConnector {
   public async rescheduleAppointment(
     request: StandardRescheduleRequest
   ): Promise<StandardBookingResponse> {
-    const res = await this.fallbackSandbox.rescheduleAppointment({
-      bookingRef: request.booking_ref,
-      patientMobile: request.patient_mobile,
-      targetDoctorId: request.target_doctor_id,
-      targetDate: request.target_date,
-      targetSlotTime: request.target_slot_time,
-      idempotencyKey: request.idempotency_key,
-    });
+    if (this.isSimulationMode()) {
+      const res = await this.fallbackSandbox.rescheduleAppointment({
+        bookingRef: request.booking_ref,
+        patientMobile: request.patient_mobile,
+        targetDoctorId: request.target_doctor_id,
+        targetDate: request.target_date,
+        targetSlotTime: request.target_slot_time,
+        idempotencyKey: request.idempotency_key,
+      });
+
+      return {
+        success: res.success,
+        booking_ref: res.bookingRef,
+        token_number: res.tokenNumber,
+        consultation_fee: res.consultationFee,
+        allocated_slot: res.allocatedSlot,
+        verified_by_hms: res.success,
+        error_code: res.errorCode as StandardBookingResponse["error_code"],
+        error_message: res.error,
+        is_simulated: true,
+        source: "SIMULATED_MOCK_SANDBOX",
+      };
+    }
 
     return {
-      success: res.success,
-      booking_ref: res.bookingRef,
-      token_number: res.tokenNumber,
-      consultation_fee: res.consultationFee,
-      allocated_slot: res.allocatedSlot,
-      verified_by_hms: res.success,
-      error_code: res.errorCode as StandardBookingResponse["error_code"],
-      error_message: res.error,
+      success: false,
+      verified_by_hms: false,
+      error_code: "VPN_UNAVAILABLE",
+      error_message: "Grandis HMS unreachable. Reschedule operation failed closed.",
+      is_simulated: false,
+      source: "PRODUCTION_HMS",
     };
   }
 
   public async cancelAppointment(request: StandardCancelRequest): Promise<StandardCancelResponse> {
-    const res = await this.fallbackSandbox.cancelAppointment(
-      request.booking_ref,
-      request.idempotency_key
-    );
+    if (this.isSimulationMode()) {
+      const res = await this.fallbackSandbox.cancelAppointment(
+        request.booking_ref,
+        request.idempotency_key
+      );
+
+      return {
+        success: res.success,
+        cancelled_ref: res.cancelledRef,
+        released_slot: res.releasedSlot,
+        verified_by_hms: res.success,
+        error: res.error,
+      };
+    }
 
     return {
-      success: res.success,
-      cancelled_ref: res.cancelledRef,
-      released_slot: res.releasedSlot,
-      verified_by_hms: res.success,
-      error: res.error,
+      success: false,
+      verified_by_hms: false,
+      cancelled_ref: request.booking_ref,
+      error: "Grandis HMS unreachable. Cancellation operation failed closed.",
     };
   }
 
   public async verifyAppointmentStatus(bookingRef: string): Promise<StandardVerificationResult> {
-    const res = await this.fallbackSandbox.verifyBooking(bookingRef);
+    if (this.isSimulationMode()) {
+      const res = await this.fallbackSandbox.verifyBooking(bookingRef);
+      return {
+        verified: res.verified,
+        booking_ref: res.bookingRef,
+        status: res.status,
+        doctor_name: res.doctorName,
+        slot: res.slot,
+        last_verified_at: new Date().toISOString(),
+      };
+    }
+
     return {
-      verified: res.verified,
-      booking_ref: res.bookingRef,
-      status: res.status,
-      doctor_name: res.doctorName,
-      slot: res.slot,
+      verified: false,
+      booking_ref: bookingRef,
+      status: "NOT_FOUND",
       last_verified_at: new Date().toISOString(),
     };
   }

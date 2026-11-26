@@ -1,10 +1,10 @@
 /**
  * ============================================================================
- * SMRKOMED TOOL API: CHECK OPD AVAILABILITY (PHASE 10)
+ * SMRKO VOICE TOOL API: CHECK OPD AVAILABILITY (PHASE 3 / SMRKOMED)
  * ============================================================================
  *
- * Invoked by Sarvam Voice Agents (@check_opd_availability tool) to check
- * doctor consulting hours and appointment slot availability in HMS.
+ * Invoked by SMRKO VOICE Engine (@check_availability tool) to check
+ * doctor consulting hours and appointment slot availability in Daya HMS.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -13,33 +13,7 @@ import {
   validateHospitalTenant,
   logVoiceAgentToolAudit,
 } from "@/lib/integrations/sarvam/voice-agent-auth";
-
-const MOCK_OPD_DOCTORS: Record<string, { doctor: string; specialization: string; timing: string; slotsAvailable: number }> = {
-  dept_cardiology: {
-    doctor: "Dr. Anand Menon, MD, DM (Cardiology)",
-    specialization: "Chief Interventional Cardiologist",
-    timing: "09:30 AM - 01:00 PM (Mon-Sat)",
-    slotsAvailable: 8,
-  },
-  dept_ortho: {
-    doctor: "Dr. Rajesh Varma, MS (Ortho), MCh",
-    specialization: "Senior Orthopedic & Joint Replacement Surgeon",
-    timing: "10:00 AM - 02:00 PM (Mon-Sat)",
-    slotsAvailable: 12,
-  },
-  dept_pediatrics: {
-    doctor: "Dr. Susan George, MD (Pediatrics)",
-    specialization: "Senior Consultant Pediatrician",
-    timing: "09:00 AM - 01:30 PM (Mon-Sat)",
-    slotsAvailable: 15,
-  },
-  dept_general_medicine: {
-    doctor: "Dr. Harikrishnan, MD (General Medicine)",
-    specialization: "Consultant Physician",
-    timing: "08:30 AM - 03:00 PM (Mon-Sat)",
-    slotsAvailable: 20,
-  },
-};
+import { integrations } from "@/lib/integrations";
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,8 +26,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { departmentId, preferredDate, hospitalId = "hosp_daya_thrissur" } = body;
+    const body = await request.json().catch(() => ({}));
+    const {
+      departmentId,
+      department,
+      doctorName,
+      preferredDate,
+      hospitalId = "hosp_daya_thrissur",
+    } = body;
 
     // 2. Identify & validate tenant
     const tenantResult = validateHospitalTenant(hospitalId);
@@ -64,59 +44,137 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!departmentId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "departmentId is required (e.g. dept_cardiology, dept_ortho, dept_pediatrics)",
-        },
-        { status: 400 }
-      );
+    const isSimulate =
+      request.headers.get("x-hms-simulation") === "true" ||
+      request.nextUrl.searchParams.get("simulate") === "true";
+
+    const hmsAdapter = integrations.getHmsAdapter(isSimulate);
+    const resolvedDeptQuery = department || departmentId || undefined;
+    const targetDate = preferredDate || new Date().toISOString().split("T")[0];
+
+    // Find doctors matching department or name
+    let doctors: any[] = [];
+    try {
+      doctors = await hmsAdapter.getDoctors(resolvedDeptQuery);
+    } catch (hmsErr: any) {
+      if (!isSimulate) {
+        return NextResponse.json(
+          {
+            success: false,
+            available: false,
+            error: "HMS_UNAVAILABLE",
+            hmsStatus: "DISCONNECTED",
+            hospitalId: tenantResult.hospitalConfig.hospitalId,
+            verbalSummaryMalayalam:
+              "ക്ഷമിക്കണം, ഹോസ്പിറ്റൽ ഒ.പി.ഡി വിവരങ്ങൾ ഇപ്പോൾ ലഭ്യമാക്കാൻ സാധിക്കുന്നില്ല. ഞങ്ങളുടെ റിസപ്ഷനുമായി ബന്ധിപ്പിക്കാം.",
+            verbalSummaryEnglish:
+              "Sorry, hospital appointment scheduling is temporarily unreachable. Let me connect you with our receptionist.",
+            agentInstructions:
+              "Hospital scheduling system is unreachable. Apologize to caller and execute @receptionist_transfer or offer phone number 0487 247 5000.",
+          },
+          { status: 503 }
+        );
+      }
     }
 
-    const doctorInfo = MOCK_OPD_DOCTORS[departmentId] || {
-      doctor: "Duty Consultant Physician",
-      specialization: "General OPD",
-      timing: "09:00 AM - 01:00 PM",
-      slotsAvailable: 5,
-    };
+    if (doctorName && doctorName.trim()) {
+      const docQuery = doctorName.toLowerCase().trim();
+      const byName = doctors.filter((d) => d.doctorName.toLowerCase().includes(docQuery));
+      if (byName.length > 0) {
+        doctors = byName;
+      }
+    }
+
+    if (doctors.length === 0) {
+      return NextResponse.json({
+        success: true,
+        available: false,
+        hospitalId: tenantResult.hospitalConfig.hospitalId,
+        department: resolvedDeptQuery || null,
+        doctor: doctorName || null,
+        date: targetDate,
+        availableSlots: [],
+        verbalSummaryMalayalam: "ക്ഷമിക്കണം, നിർദ്ദേശിച്ച വിഭാഗത്തിൽ ഇപ്പോൾ ഡോക്ടർമാരുടെ സേവനം ലഭ്യമല്ല.",
+        verbalSummaryEnglish: "Sorry, no doctors are currently available for this department.",
+        agentInstructions: "No doctors match the caller query. Inquire if they wish to consult another department or speak with reception.",
+      });
+    }
+
+    const selectedDoctor = doctors[0];
+
+    // Query available slots
+    let slots: any[] = [];
+    try {
+      slots = await hmsAdapter.checkDoctorSlots(selectedDoctor.doctorId, targetDate);
+    } catch (slotErr) {
+      if (!isSimulate) {
+        return NextResponse.json(
+          {
+            success: false,
+            available: false,
+            error: "HMS_UNAVAILABLE",
+            hmsStatus: "DISCONNECTED",
+            hospitalId: tenantResult.hospitalConfig.hospitalId,
+            verbalSummaryMalayalam:
+              "ക്ഷമിക്കണം, ഡോക്ടറുടെ സ്ലോട്ട് വിവരങ്ങൾ ഇപ്പോൾ ലഭ്യമാക്കാൻ സാധിക്കുന്നില്ല. ഞങ്ങളുടെ റിസപ്ഷനുമായി ബന്ധിപ്പിക്കാം.",
+            verbalSummaryEnglish:
+              "Sorry, doctor slot schedule is temporarily unreachable. Let me connect you with our receptionist.",
+            agentInstructions:
+              "Doctor slot retrieval failed from HMS. Inform caller and transfer to human receptionist desk.",
+          },
+          { status: 503 }
+        );
+      }
+    }
+
+    const availableSlots = slots.filter((s) => s.isAvailable);
+    const slotTimes = availableSlots.map((s) => s.time);
 
     // 3. Audit log
     logVoiceAgentToolAudit("CheckAvailability", tenantResult.hospitalConfig.hospitalId, {
-      departmentId,
-      date: preferredDate || "today",
-      doctor: doctorInfo.doctor,
-      slotsAvailable: doctorInfo.slotsAvailable,
+      department: resolvedDeptQuery || "ALL",
+      doctor: selectedDoctor.doctorName,
+      date: targetDate,
+      slotsFound: slotTimes.length,
+      isSimulated: isSimulate,
     });
 
+    if (slotTimes.length === 0) {
+      return NextResponse.json({
+        success: true,
+        available: false,
+        hospitalId: tenantResult.hospitalConfig.hospitalId,
+        department: selectedDoctor.department,
+        doctor: selectedDoctor.doctorName,
+        doctorId: selectedDoctor.doctorId,
+        date: targetDate,
+        availableSlots: [],
+        verbalSummaryMalayalam: `ക്ഷമിക്കണം, ${selectedDoctor.doctorName}-ന് ${targetDate} തീയതിയിൽ സ്ലോട്ടുകൾ ലഭ്യമല്ല. മറ്റൊരു തീയതി പരിശോധിക്കണോ?`,
+        verbalSummaryEnglish: `Sorry, no consultation slots are available for ${selectedDoctor.doctorName} on ${targetDate}. Would you like to check another date?`,
+        agentInstructions: "All slots for this doctor on the selected date are full. Offer to check the next available consultation day.",
+      });
+    }
+
+    const displaySlots = slotTimes.slice(0, 3).join(", ");
     return NextResponse.json({
       success: true,
-      available: doctorInfo.slotsAvailable > 0,
-      departmentId,
+      available: true,
       hospitalId: tenantResult.hospitalConfig.hospitalId,
-      date: preferredDate || new Date().toISOString().split("T")[0],
-      doctor: doctorInfo.doctor,
-      specialization: doctorInfo.specialization,
-      consultingHours: doctorInfo.timing,
-      slotsRemaining: doctorInfo.slotsAvailable,
-      suggestedSlots: ["10:00 AM", "10:30 AM", "11:15 AM", "12:00 PM"],
-      isSimulated: true,
-      dataSource: "SIMULATED_MOCK_HMS",
-      agentInstructions:
-        "CRITICAL CLINICAL SAFEGUARD: Real HMS integration is currently in simulated testing. Inform the caller of doctor consulting timings, but state clearly that real-time live appointment booking cannot yet be confirmed through the automated phone system.",
-      disclaimerMalayalam:
-        "ദയ ഹോസ്പിറ്റലിലെ ഒ.പി. പരിശോധനാ സമയം ലഭ്യമാണ്. എന്നാൽ ആശുപത്രിയിലെ സിസ്റ്റം പരിശോധന നടക്കുന്നതിനാൽ നേരിട്ടുള്ള ഫൈനൽ ബുക്കിംഗ് ആശുപത്രി റിസപ്ഷൻ വഴി ഉറപ്പുവരുത്തേണ്ടതാണ്.",
-      disclaimerEnglish:
-        "Doctor consulting hours are available. Since real HMS integration is in testing mode, real-time live appointment booking cannot yet be confirmed over this call.",
+      department: selectedDoctor.department,
+      doctor: selectedDoctor.doctorName,
+      doctorId: selectedDoctor.doctorId,
+      date: targetDate,
+      consultingHours: selectedDoctor.opdDays.join(", "),
+      consultationFee: selectedDoctor.consultationFee,
+      availableSlots: slotTimes.slice(0, 4),
+      verbalSummaryMalayalam: `${selectedDoctor.doctorName} ${targetDate} തീയതിയിൽ ലഭ്യമാണ്. ലഭ്യമായ സമയങ്ങൾ: ${displaySlots}. ഇതിൽ ഏത് സമയമാണ് താങ്കൾക്ക് വേണ്ടത്?`,
+      verbalSummaryEnglish: `${selectedDoctor.doctorName} is available on ${targetDate}. Available slots are ${displaySlots}. Which time works best for you?`,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : "Internal error querying OPD availability";
     return NextResponse.json(
-      {
-        success: false,
-        error: err?.message || "Internal error querying OPD availability",
-      },
+      { success: false, error: errorMsg },
       { status: 500 }
     );
   }
 }
-

@@ -199,9 +199,9 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
     ringTimeoutSeconds: 20,
     maxHops: 3,
     casualtyExtension: "100",
-    // RECLASSIFIED PER PHASE 10.8: Strictly temporary development test receiver.
+    // RECLASSIFIED PER PHASE 10.13: Strictly temporary development test receiver (+919740662046).
     // Live carrier emergency PSTN transfer is disabled until hospital-approved clinical casualty trunk is confirmed.
-    casualtyDirectNumber: process.env.DAYA_CASUALTY_NUMBER || "+919606654032",
+    casualtyDirectNumber: process.env.DAYA_CASUALTY_NUMBER || "+919740662046",
     receptionistNumber: process.env.DAYA_RECEPTION_NUMBER || "+919606654032",
     receiverClassification: "TEMPORARY_DEV_TEST_RECEIVER",
     emergencyLivePstnTransferEnabled: false,

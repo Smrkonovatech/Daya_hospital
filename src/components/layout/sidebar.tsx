@@ -54,7 +54,7 @@ const navItems = [
     name: "AI Voice Agents",
     href: "/agents",
     icon: Bot,
-    badge: "Sarvam",
+    badge: "SMRKO",
     badgeVariant: "teal" as const,
   },
   {

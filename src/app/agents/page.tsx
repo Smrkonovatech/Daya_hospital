@@ -200,17 +200,17 @@ export default function AgentsPage() {
     <DashboardLayout>
       <div className="space-y-6">
         <PageHeader
-          title="Sarvam AI Voice Agents"
-          description="Create, configure, test, and publish multilingual hospital voice agents powered by Sarvam AI."
+          title="SMRKO VOICE Agents"
+          description="Create, configure, test, and publish multilingual hospital voice agents powered by SMRKO VOICE Engine."
           badge={
             <Badge variant="teal" size="sm" className="gap-1">
               <Sparkles className="h-3 w-3" />
-              <span>Sarvam Bulbul v3 Verified</span>
+              <span>SMRKO VOICE Verified</span>
             </Badge>
           }
           breadcrumbs={[
             { label: "Overview", href: "/overview" },
-            { label: "AI Voice Agents" },
+            { label: "SMRKO VOICE Agents" },
           ]}
           actions={
             isAdmin && (
@@ -221,7 +221,7 @@ export default function AgentsPage() {
                 className="gap-2"
               >
                 <Plus className="h-4 w-4" />
-                <span>Create AI Agent</span>
+                <span>Create Voice Agent</span>
               </Button>
             )
           }
@@ -234,11 +234,11 @@ export default function AgentsPage() {
           </div>
           <div className="space-y-1">
             <h4 className="font-semibold text-blue-950">
-              Sarvam AI Multilingual Hospital Voice Agents
+              SMRKO VOICE Multilingual Hospital Voice Agents
             </h4>
             <p className="text-blue-800/90 leading-relaxed">
               Every agent configured here streams natural spoken Malayalam and Indian English through the persistent
-              Railway Media Gateway connected to Exotel. Changes are saved as <strong>Drafts</strong> and do not affect live calls
+              Media Gateway connected to the IVR Provider. Changes are saved as <strong>Drafts</strong> and do not affect live calls
               until explicitly <strong>Published</strong>.
             </p>
           </div>
@@ -400,7 +400,7 @@ export default function AgentsPage() {
           isOpen={isCreateOpen}
           onClose={() => setIsCreateOpen(false)}
           title="Create New AI Voice Agent"
-          description="Provision a new specialized Sarvam-powered voice assistant for your hospital."
+          description="Provision a new specialized voice assistant powered by SMRKO VOICE Engine."
         >
           <form onSubmit={handleCreateAgent} className="space-y-4 text-xs">
             <div className="space-y-1">
@@ -430,9 +430,9 @@ export default function AgentsPage() {
 
             <div className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-[11px] text-blue-800 space-y-1">
               <span className="font-semibold block">Default Initial Stack:</span>
-              <p>• TTS: Sarvam Bulbul v3 (Speaker Kavitha - Malayalam & English)</p>
-              <p>• STT: Sarvam Saaras v4 Real-time Streaming (8000 Hz linear16)</p>
-              <p>• LLM: Sarvam 105B Conversations tuned for Indian healthcare</p>
+              <p>• Voice Synthesis: SMRKO VOICE Bulbul v3 (Speaker Kavitha - Malayalam & English)</p>
+              <p>• Speech Recognition: Real-time Streaming (8000 Hz linear16)</p>
+              <p>• Conversation Engine: SMRKO VOICE Intelligence tuned for Indian healthcare</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

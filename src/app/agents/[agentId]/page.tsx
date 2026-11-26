@@ -214,7 +214,7 @@ function AgentBuilderContent() {
         showToast({
           type: "info",
           title: "Voice Audio Generated",
-          message: `Sarvam ${agent.ttsModel} synthesized speech in ${json.latencyMs}ms.`,
+          message: `SMRKO VOICE (${agent.ttsModel}) synthesized speech in ${json.latencyMs}ms.`,
         });
       } else {
         showToast({ type: "error", title: "Preview Error", message: json.error || "Synthesis failed." });
@@ -302,7 +302,7 @@ function AgentBuilderContent() {
       <DashboardLayout>
         <div className="p-16 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin text-[#0C5DB8]" />
-          <span>Loading Sarvam Voice Agent Builder...</span>
+          <span>Loading SMRKO VOICE Agent Builder...</span>
         </div>
       </DashboardLayout>
     );
@@ -314,7 +314,7 @@ function AgentBuilderContent() {
         {/* Header */}
         <PageHeader
           title={agent.name}
-          description={`Configuring Sarvam multilingual voice agent (v${agent.currentVersion}) for Daya Hospital.`}
+          description={`Configuring SMRKO VOICE multilingual agent (v${agent.currentVersion}) for Daya Hospital.`}
           badge={
             <Badge
               variant={
@@ -467,7 +467,7 @@ function AgentBuilderContent() {
                   <CardHeader>
                     <CardTitle className="text-sm font-bold flex items-center gap-2">
                       <Volume2 className="h-4 w-4 text-[#0C5DB8]" />
-                      <span>Sarvam Neural TTS Voice Catalogue</span>
+                      <span>SMRKO VOICE Neural Voice Catalogue</span>
                     </CardTitle>
                     <CardDescription>
                       Select an official verified neural voice model and speaker tuned for Malayalam telephony.
@@ -660,7 +660,7 @@ function AgentBuilderContent() {
                     )}
 
                     <div className="text-[11px] text-slate-500 pt-1 leading-relaxed border-t border-slate-100">
-                      Plays audio using official <strong>Sarvam {agent.ttsModel}</strong> neural voice model
+                      Plays audio using official <strong>SMRKO VOICE ({agent.ttsModel})</strong> neural voice model
                       with speaker <strong>{agent.speaker}</strong> at <strong>{agent.speakingPace}x</strong>.
                     </div>
                   </CardContent>
