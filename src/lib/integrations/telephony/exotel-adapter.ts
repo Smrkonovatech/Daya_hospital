@@ -423,15 +423,10 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       params.append("TimeOut", String(request.timeOut || 30));
       params.append("Record", request.record !== undefined ? (request.record ? "true" : "false") : "true");
 
-      // Exotel's Calls/connect API accepts only "terminal" and "answered", sent as indexed
-      // StatusCallbackEvents[0], [1]; any other value ("ringing", "in-progress") rejects the whole call.
-      const EXOTEL_CALLBACK_EVENTS = new Set(["terminal", "answered"]);
-      const callbackEvents = (request.statusCallbackEvents || ["terminal", "answered"]).filter((evt) =>
-        EXOTEL_CALLBACK_EVENTS.has(evt)
-      );
-      [...new Set(callbackEvents)].forEach((evt, i) => {
-        params.append(`StatusCallbackEvents[${i}]`, evt);
-      });
+      // StatusCallbackEvents is deliberately not sent. Every encoding we tried ("StatusCallbackEvents[]",
+      // "StatusCallbackEvents[0]") made Exotel reject the whole call with "Invalid 'StatusCallbackEvents'
+      // specified", and Exotel's own examples send only StatusCallback, which reports the terminal status
+      // (completed / failed / busy / no-answer) by default. request.statusCallbackEvents is ignored here.
 
       const res = await this.fetchWithRetry(endpoint, {
         method: "POST",
