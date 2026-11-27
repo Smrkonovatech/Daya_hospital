@@ -423,10 +423,15 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
       params.append("TimeOut", String(request.timeOut || 30));
       params.append("Record", request.record !== undefined ? (request.record ? "true" : "false") : "true");
 
-      const callbackEvents = request.statusCallbackEvents || ["terminal", "answered", "ringing"];
-      for (const evt of callbackEvents) {
-        params.append("StatusCallbackEvents[]", evt);
-      }
+      // Exotel's Calls/connect API accepts only "terminal" and "answered", sent as indexed
+      // StatusCallbackEvents[0], [1]; any other value ("ringing", "in-progress") rejects the whole call.
+      const EXOTEL_CALLBACK_EVENTS = new Set(["terminal", "answered"]);
+      const callbackEvents = (request.statusCallbackEvents || ["terminal", "answered"]).filter((evt) =>
+        EXOTEL_CALLBACK_EVENTS.has(evt)
+      );
+      [...new Set(callbackEvents)].forEach((evt, i) => {
+        params.append(`StatusCallbackEvents[${i}]`, evt);
+      });
 
       const res = await this.fetchWithRetry(endpoint, {
         method: "POST",

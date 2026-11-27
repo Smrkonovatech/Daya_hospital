@@ -349,7 +349,7 @@ export class ExotelTelephonyService {
       url: `https://my.exotel.com/${accountSid}/exoml/start_voice/${appId}`,
       customField: customMetadata,
       statusCallback: hospital.telephony.exotel?.statusCallbackUrl,
-      statusCallbackEvents: ["terminal", "answered", "ringing"],
+      statusCallbackEvents: ["terminal", "answered"],
       timeLimit: hospital.telephony.exotel?.maxCallDurationSeconds || 600,
       timeOut: hospital.telephony.exotel?.ringTimeoutSeconds || 30,
       record: true,
