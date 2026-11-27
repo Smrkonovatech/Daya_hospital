@@ -47,7 +47,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       },
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/context",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/context",
       method: "GET",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -77,7 +77,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       },
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/doctors",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/doctors",
       method: "GET",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -112,7 +112,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["departmentId"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/check-availability",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/check-availability",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -163,7 +163,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["patientName", "patientPhone", "departmentId"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/book-appointment",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/book-appointment",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -202,7 +202,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["bookingRef", "targetDate", "targetSlotTime"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/reschedule-appointment",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/reschedule-appointment",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -233,7 +233,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["bookingRef"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/cancel-appointment",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/cancel-appointment",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -263,7 +263,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       },
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/get-appointment",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/get-appointment",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -298,7 +298,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["symptom"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/emergency-escalate",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/emergency-escalate",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -341,7 +341,7 @@ export const SARVAM_BOUND_TOOLS: SarvamAgentTool[] = [
       required: ["interaction_id"],
     },
     endpoint: {
-      url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/call-ended",
+      url: "https://aicalling.smrkomed.com/api/v1/voice-agent/call-ended",
       method: "POST",
       headers: {
         "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -414,7 +414,7 @@ export const DRAFT_AGENT_VERSION_9_DEPLOYMENT: SarvamVoiceAgentDeployment = {
   voiceId: "kavitha",
   tools: SARVAM_BOUND_TOOLS,
   onStartHook: {
-    url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/context",
+    url: "https://aicalling.smrkomed.com/api/v1/voice-agent/context",
     method: "GET",
     headers: {
       "X-SMRKOMED-Tenant": "hosp_daya_thrissur",
@@ -422,7 +422,7 @@ export const DRAFT_AGENT_VERSION_9_DEPLOYMENT: SarvamVoiceAgentDeployment = {
     timeoutMs: 3000,
   },
   onEndHook: {
-    url: "https://dayahospital-production-467a7d31.up.railway.app/api/v1/voice-agent/call-ended",
+    url: "https://aicalling.smrkomed.com/api/v1/voice-agent/call-ended",
     method: "POST",
     headers: {
       "X-SMRKOMED-Tenant": "hosp_daya_thrissur",

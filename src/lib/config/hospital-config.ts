@@ -164,7 +164,7 @@ export const DAYA_HOSPITAL_CONFIG: HospitalConfig = {
       webhookSecret: process.env.EXOTEL_WEBHOOK_SECRET || "exotel_webhook_secret_daya_2026",
       statusCallbackUrl:
         process.env.EXOTEL_STATUS_CALLBACK_URL ||
-        "https://dayahospital-production-467a7d31.up.railway.app/api/webhooks/exotel",
+        "https://aicalling.smrkomed.com/api/webhooks/exotel",
       statusCallbackEvents: ["terminal", "answered", "in-progress"],
       maxCallDurationSeconds: 600,
       ringTimeoutSeconds: 20,

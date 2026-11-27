@@ -121,7 +121,7 @@ export class ConfigurationService {
         exotelDefaultExoPhone: process.env.EXOTEL_DEFAULT_EXOPHONE || "08047291658",
         exotelDefaultAppId: process.env.EXOTEL_DEFAULT_APP_ID || "1393239",
         exotelWebhookSecret: process.env.EXOTEL_WEBHOOK_SECRET || "smrko_telephony_secret_2026",
-        exotelStatusCallbackUrl: "https://dayahospital-production-467a7d31.up.railway.app/api/webhooks/exotel",
+        exotelStatusCallbackUrl: "https://aicalling.smrkomed.com/api/webhooks/exotel",
         incomingVirtualNumbers: ["08047291658", "+914872475000"],
         transferDestinations: [
           { label: "Casualty Emergency", extension: "100", number: "+914872475100" },

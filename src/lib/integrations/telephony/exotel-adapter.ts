@@ -367,7 +367,23 @@ export class ExotelTelephonyAdapter implements ITelephonyConnector {
     const statusCallback = request.statusCallback || this.statusCallbackUrl;
 
     if (!this.isLiveConfigured()) {
-      // Mock Sandbox Response
+      // In production a fake "dispatched" result hides that nothing was dialled, so fail loudly.
+      if (process.env.NODE_ENV === "production") {
+        return {
+          success: false,
+          callSid: "",
+          accountSid: this.accountSid,
+          status: "failed",
+          direction: "outbound-api",
+          from: request.from,
+          to: request.to,
+          dateCreated: new Date().toISOString(),
+          error:
+            "No call was placed: Exotel is not configured on this server " +
+            "(EXOTEL_ACCOUNT_SID, EXOTEL_API_KEY and EXOTEL_API_TOKEN are required).",
+        };
+      }
+      // Mock Sandbox Response (development and tests only)
       const mockCallSid = `exo_call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       return {
         success: true,
